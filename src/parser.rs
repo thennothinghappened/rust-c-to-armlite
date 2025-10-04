@@ -97,10 +97,7 @@ impl<'a> Parser<'a> {
     fn parse_struct(&mut self) -> Result<Type, ParseError<'a>> {
         let start = self.lexer.expect(Token::Struct)?;
 
-        let struct_name = self.lexer.maybe_map_next(|token| match token {
-            Token::Ident(name) => Some(name.to_string()),
-            _ => None,
-        });
+        let struct_name = self.lexer.accept_ident().map(str::to_string);
 
         self.lexer.expect(Token::OpenCurly)?;
         let mut builder = StructBuilder::new();
@@ -116,12 +113,18 @@ impl<'a> Parser<'a> {
                 .map_err(|err| self.bad_definition(todo!(), err.into()))?;
         }
 
-        let type_id = self
-            .program
-            .define_struct(struct_name, builder.build())
-            .map_err(|err| self.bad_definition(start.until(self.lexer.index), err))?;
+        match struct_name {
+            Some(name) => {
+                let type_id = self
+                    .program
+                    .declare_named_struct(name, builder.build())
+                    .map_err(|err| self.bad_definition(start.until(self.lexer.index), err))?;
 
-        Ok(type_id.into())
+                Ok(Type::WithId(type_id))
+            }
+
+            None => Ok(Type::Inline(builder.build().into())),
+        }
     }
 
     /// Parse the type given for a symbol, i.e. a variable, struct member etc.

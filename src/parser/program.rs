@@ -11,9 +11,9 @@ pub mod types;
 
 #[derive(Default)]
 pub struct Program {
-    functions: HashMap<String, Type>,
-    structs: HashMap<String, Type>,
-    enums: HashMap<String, Type>,
+    functions: HashMap<String, TypeId>,
+    structs: HashMap<String, TypeId>,
+    enums: HashMap<String, TypeId>,
     typedefs: HashMap<String, Type>,
     id_to_concrete_type: HashMap<TypeId, TypeInfo>,
     next_type_id: TypeId,
@@ -27,32 +27,31 @@ impl Program {
         Ok(())
     }
 
-    pub fn define_struct(
+    pub fn declare_named_struct(
         &mut self,
-        name: Option<String>,
-        type_info: Struct,
+        name: String,
+        struct_type: Struct,
     ) -> Result<TypeId, DefineTypeError> {
-        todo!()
-        // if let Some(name) = name {
-        //     let Some(existing_id) = self.structs.get(&name) else {
-        //         let id = self.define_type(type_info);
-        //         self.structs.insert(name, id);
+        let Some((&existing_id, existing_struct)) = self
+            .structs
+            .get(&name)
+            .and_then(|id| Some((id, self.get_struct_by_id(id)?)))
+        else {
+            let id = self.define_type(struct_type);
+            self.structs.insert(name, id);
 
-        //         return Ok(id);
-        //     };
+            return Ok(id);
+        };
 
-        //     if *existing_id != type_info {
-        //         return Err(DefineTypeError::Redefinition(
-        //             name,
-        //             self.get_type_by_id(existing_id),
-        //             type_info.into(),
-        //         ));
-        //     }
+        if *existing_struct != struct_type {
+            return Err(DefineTypeError::Redefinition(
+                name,
+                existing_struct.clone().into(),
+                struct_type.into(),
+            ));
+        }
 
-        //     self.structs.entry(name).or_insert(type_info);
-        // }
-
-        // Ok()
+        Ok(existing_id)
     }
 
     pub fn get_type_by_id(&self, id: &TypeId) -> Option<&TypeInfo> {
@@ -67,7 +66,7 @@ impl Program {
         None
     }
 
-    pub fn get_type_by_name(&self, name: String) -> Option<&TypeInfo> {
+    pub fn get_type_by_name(&self, name: &str) -> Option<&TypeInfo> {
         todo!()
     }
 
