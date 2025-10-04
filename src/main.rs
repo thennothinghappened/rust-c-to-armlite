@@ -46,13 +46,5 @@ fn main() {
         };
 
         println!("Program: {program}");
-
-        // while let Some((token, location)) = lexer.next() {
-        //     let diagnostic = Diagnostic::note()
-        //         .with_label(Label::primary(file, location).with_message(format!("{token:?}")));
-
-        //     term::emit(&mut writer.lock(), &config, &files, &diagnostic).unwrap();
-        //     // println!("Token {token:?} at {pos}");
-        // }
     }
 }
