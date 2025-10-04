@@ -9,9 +9,14 @@ use codespan_reporting::{
     },
 };
 
-use crate::lexer::Lexer;
+use crate::{
+    lexer::{Lexer, Token, TokenInfo},
+    parser::Parser,
+};
 
 mod lexer;
+mod parser;
+mod span;
 
 fn main() {
     let writer = StandardStream::stderr(ColorChoice::Always);
@@ -23,17 +28,31 @@ fn main() {
         let mut buf = String::new();
         stdin.read_line(&mut buf).unwrap();
 
-        let mut lexer = Lexer::new(&buf);
+        let lexer = Lexer::new(&buf);
+        let parser = Parser::new(lexer);
 
-        let mut files = SimpleFiles::new();
-        let file = files.add("main.c", &buf);
+        let program = match parser.parse() {
+            Ok(program) => program,
+            Err(err) => {
+                let mut files = SimpleFiles::new();
+                let file = files.add("main.c", &buf);
 
-        while let Some((token, pos)) = lexer.next() {
-            let diagnostic = Diagnostic::note()
-                .with_label(Label::primary(file, pos).with_message(format!("{token:?}")));
+                let diagnostic = Diagnostic::error()
+                    .with_label(Label::primary(file, err.location).with_message(err.kind));
 
-            term::emit(&mut writer.lock(), &config, &files, &diagnostic).unwrap();
-            // println!("Token {token:?} at {pos}");
-        }
+                term::emit(&mut writer.lock(), &config, &files, &diagnostic).unwrap();
+                continue;
+            }
+        };
+
+        println!("Program: {program}");
+
+        // while let Some((token, location)) = lexer.next() {
+        //     let diagnostic = Diagnostic::note()
+        //         .with_label(Label::primary(file, location).with_message(format!("{token:?}")));
+
+        //     term::emit(&mut writer.lock(), &config, &files, &diagnostic).unwrap();
+        //     // println!("Token {token:?} at {pos}");
+        // }
     }
 }

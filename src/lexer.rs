@@ -1,8 +1,11 @@
 use std::{fmt::Display, ops::Range, str::Chars};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use thiserror::Error;
+
+use crate::span::Span;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Token<'a> {
-    Whitespace(&'a str),
     Semicolon,
     OpenParen,
     CloseParen,
@@ -12,41 +15,113 @@ pub(crate) enum Token<'a> {
     Star,
     Assign,
     BooleanEqual,
+    If,
+    Else,
+    While,
+    Return,
+    Struct,
+    Union,
+    TypeDef,
+    Enum,
+    Const,
+    Signed,
+    Unsigned,
+    Short,
+    Int,
+    Long,
+    Char,
+    Float,
+    Double,
+    Void,
     StringLiteral(&'a str),
     Ident(&'a str),
     Unknown(char),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Span {
-    start: usize,
-    end: usize,
+impl<'a> TryFrom<Token<'a>> for &'static str {
+    type Error = ();
+
+    fn try_from(value: Token<'a>) -> Result<Self, Self::Error> {
+        Ok(match value {
+            Token::Semicolon => ";",
+            Token::OpenParen => "(",
+            Token::CloseParen => ")",
+            Token::OpenCurly => "{",
+            Token::CloseCurly => "}",
+            Token::Ampersand => "&",
+            Token::Star => "*",
+            Token::Assign => "=",
+            Token::BooleanEqual => "==",
+            Token::If => "if",
+            Token::Else => "else",
+            Token::While => "while",
+            Token::Return => "return",
+            Token::Struct => "struct",
+            Token::Union => "union",
+            Token::TypeDef => "typedef",
+            Token::Enum => "enum",
+            Token::Unsigned => "unsigned",
+            Token::Signed => "signed",
+            Token::Int => "int",
+            Token::Long => "long",
+            Token::Short => "short",
+            Token::Char => "char",
+            Token::Float => "float",
+            Token::Double => "double",
+            _ => return Err(()),
+        })
+    }
 }
 
-pub(crate) type TokenInfo<'a> = (Token<'a>, Range<usize>);
+impl<'a> Display for Token<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Ok(str) = <&'static str>::try_from(*self) {
+            return write!(f, "{str}");
+        }
+
+        match self {
+            Token::StringLiteral(content) => write!(f, "\"{content}\""),
+            Token::Ident(name) => write!(f, "Ident({name})"),
+            Token::Unknown(char) => write!(f, "Unknown({char})"),
+            _ => panic!("unhandled case {self:?}, somebody forgot to add it"),
+        }
+    }
+}
+
+pub(crate) type TokenInfo<'a> = (Token<'a>, Span);
 
 #[derive(Clone)]
-pub(crate) struct Lexer<T> {
-    chars: T,
-    index: usize,
+pub(crate) struct Lexer<'a> {
+    pub index: usize,
+    chars: Chars<'a>,
+    maybe_peeked: Option<TokenInfo<'a>>,
 }
 
-impl<'a> Lexer<Chars<'a>> {
+impl<'a> Lexer<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             chars: text.chars(),
             index: 0,
+            maybe_peeked: None,
         }
     }
 
     pub fn next(&mut self) -> Option<TokenInfo<'a>> {
+        if let Some(peeked) = self.maybe_peeked {
+            self.maybe_peeked = None;
+            return Some(peeked);
+        }
+
+        loop {
+            // Discard whitespace.
+            let Some(_) = self.take_chars_while(|char| char.is_ascii_whitespace()) else {
+                break;
+            };
+        }
+
         let start = self.index;
 
         let token: Token<'a> = 'get_token: {
-            if let Some(whitespace) = self.take_chars_while(|char| char.is_ascii_whitespace()) {
-                break 'get_token Token::Whitespace(whitespace);
-            }
-
             let char = self.peek_char()?;
 
             let basic_token = match char {
@@ -65,17 +140,17 @@ impl<'a> Lexer<Chars<'a>> {
                 break 'get_token basic_token;
             }
 
-            if self.accept('=') {
-                break 'get_token if self.accept('=') {
+            if self.accept_char('=') {
+                break 'get_token if self.accept_char('=') {
                     Token::BooleanEqual
                 } else {
                     Token::Assign
                 };
             }
 
-            if self.accept('"') {
+            if self.accept_char('"') {
                 let content = self.take_chars_while(|char| char != '"');
-                self.consume('"');
+                self.consume_char('"');
 
                 break 'get_token Token::StringLiteral(content.unwrap_or(""));
             }
@@ -85,17 +160,120 @@ impl<'a> Lexer<Chars<'a>> {
                     .take_chars_while(|char| char == '_' || char.is_alphanumeric())
                     .unwrap();
 
+                if let Some(token) = match str {
+                    "if" => Some(Token::If),
+                    "else" => Some(Token::Else),
+                    "while" => Some(Token::While),
+                    "return" => Some(Token::Return),
+                    "struct" => Some(Token::Struct),
+                    "typedef" => Some(Token::TypeDef),
+                    "union" => Some(Token::Union),
+                    "enum" => Some(Token::Enum),
+                    "unsigned" => Some(Token::Unsigned),
+                    "signed" => Some(Token::Signed),
+                    "int" => Some(Token::Int),
+                    "long" => Some(Token::Long),
+                    "short" => Some(Token::Short),
+                    "char" => Some(Token::Char),
+                    "float" => Some(Token::Float),
+                    "double" => Some(Token::Double),
+                    _ => None,
+                } {
+                    break 'get_token token;
+                }
+
                 break 'get_token Token::Ident(str);
             }
 
             Token::Unknown(self.next_char()?)
         };
 
-        Some((token, start..self.index))
+        Some((token, Span::new(start, self.index)))
     }
 
     pub fn peek(&mut self) -> Option<TokenInfo<'a>> {
-        self.clone().next()
+        if let Some(peeked) = self.maybe_peeked {
+            return Some(peeked);
+        }
+
+        let Some(peeked) = self.next() else {
+            return None;
+        };
+
+        self.maybe_peeked = Some(peeked);
+        Some(peeked)
+    }
+
+    pub fn next_if<F>(&mut self, predicate: F) -> Option<TokenInfo<'a>>
+    where
+        F: FnOnce(Token<'a>) -> bool,
+    {
+        let (token, _) = self.peek()?;
+
+        if predicate(token) {
+            return self.next();
+        }
+
+        None
+    }
+
+    pub fn maybe_map_next<F, R>(&mut self, map: F) -> Option<R>
+    where
+        F: FnOnce(Token<'a>) -> Option<R>,
+    {
+        let out = self.peek().and_then(|(token, _)| map(token))?;
+        self.next();
+
+        Some(out)
+    }
+
+    pub fn accept(&mut self, expected: Token<'a>) -> bool {
+        self.next_if(|token| token == expected).is_some()
+    }
+
+    pub fn accept_ident(&mut self) -> Option<&'a str> {
+        let (Token::Ident(identifier), _) = self.peek()? else {
+            return None;
+        };
+
+        self.next();
+        Some(identifier)
+    }
+
+    pub fn consume(&mut self) -> Result<TokenInfo<'a>, LexerError<'a>> {
+        self.next()
+            .ok_or_else(|| self.err_here(LexerErrorKind::EarlyEof))
+    }
+
+    pub fn expect(&mut self, expected: Token<'static>) -> Result<Span, LexerError<'a>> {
+        let (token, location) = self.consume()?;
+
+        if token == expected {
+            return Ok(location);
+        }
+
+        Err(LexerError {
+            location,
+            kind: LexerErrorKind::WrongToken {
+                expected,
+                actual: token,
+            },
+        })
+    }
+
+    pub fn consume_ident(&mut self) -> Result<&'a str, LexerError<'a>> {
+        let (token, location) = self
+            .next()
+            .ok_or_else(|| self.err_here(LexerErrorKind::EarlyEof))?;
+
+        if let Token::Ident(name) = token {
+            return Ok(name);
+        }
+
+        Err(LexerError::wrong_token(
+            Token::Ident("identifier"),
+            (token, location),
+        ))
     }
 
     fn next_char_if<F>(&mut self, predicate: F) -> bool
@@ -132,11 +310,11 @@ impl<'a> Lexer<Chars<'a>> {
         Some(slice)
     }
 
-    fn accept(&mut self, expected: char) -> bool {
+    fn accept_char(&mut self, expected: char) -> bool {
         self.next_char_if(|char| char == expected)
     }
 
-    fn consume(&mut self, expected: char) {
+    fn consume_char(&mut self, expected: char) {
         assert_eq!(self.next_char(), Some(expected));
     }
 
@@ -149,5 +327,43 @@ impl<'a> Lexer<Chars<'a>> {
 
     fn peek_char(&self) -> Option<char> {
         self.chars.clone().next()
+    }
+
+    fn err_here(&self, err: LexerErrorKind<'a>) -> LexerError<'a> {
+        LexerError {
+            location: self
+                .maybe_peeked
+                .map(|(_, location)| location)
+                .unwrap_or(Span::at(self.index)),
+            kind: err,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("{kind} at {location}")]
+pub struct LexerError<'a> {
+    pub location: Span,
+    pub kind: LexerErrorKind<'a>,
+}
+
+#[derive(Debug, Error)]
+pub enum LexerErrorKind<'a> {
+    #[error("Incorrect token {actual}, expected {expected}")]
+    WrongToken {
+        expected: Token<'static>,
+        actual: Token<'a>,
+    },
+
+    #[error("Unexpected End Of File")]
+    EarlyEof,
+}
+
+impl<'a> LexerError<'a> {
+    pub(super) fn wrong_token(expected: Token<'static>, (actual, location): TokenInfo<'a>) -> Self {
+        Self {
+            location,
+            kind: LexerErrorKind::WrongToken { expected, actual },
+        }
     }
 }

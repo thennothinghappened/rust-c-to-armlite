@@ -1,0 +1,151 @@
+use core::error;
+use std::{collections::HashMap, fmt::Display, rc::Rc};
+
+use thiserror::Error;
+
+use crate::parser::program::types::{Member, Struct, Type, TypeDef, TypeInfo};
+
+pub mod expr;
+pub mod statement;
+pub mod types;
+
+#[derive(Default)]
+pub struct Program {
+    functions: HashMap<String, Type>,
+    structs: HashMap<String, Type>,
+    enums: HashMap<String, Type>,
+    typedefs: HashMap<String, Type>,
+    id_to_concrete_type: HashMap<TypeId, TypeInfo>,
+    next_type_id: TypeId,
+}
+
+impl Program {
+    /// Declare that the given type name refers to a specific type, whether declared inline, or an
+    /// known existing type.
+    pub fn typedef(&mut self, typedef: TypeDef) -> Result<(), DefineTypeError> {
+        self.typedefs.insert(typedef.name, typedef.target_type);
+        Ok(())
+    }
+
+    pub fn define_struct(
+        &mut self,
+        name: Option<String>,
+        type_info: Struct,
+    ) -> Result<TypeId, DefineTypeError> {
+        todo!()
+        // if let Some(name) = name {
+        //     let Some(existing_id) = self.structs.get(&name) else {
+        //         let id = self.define_type(type_info);
+        //         self.structs.insert(name, id);
+
+        //         return Ok(id);
+        //     };
+
+        //     if *existing_id != type_info {
+        //         return Err(DefineTypeError::Redefinition(
+        //             name,
+        //             self.get_type_by_id(existing_id),
+        //             type_info.into(),
+        //         ));
+        //     }
+
+        //     self.structs.entry(name).or_insert(type_info);
+        // }
+
+        // Ok()
+    }
+
+    pub fn get_type_by_id(&self, id: &TypeId) -> Option<&TypeInfo> {
+        self.id_to_concrete_type.get(id)
+    }
+
+    pub fn get_struct_by_id(&self, id: &TypeId) -> Option<&Struct> {
+        if let Some(TypeInfo::Struct(struct_info)) = self.get_type_by_id(id) {
+            return Some(struct_info);
+        }
+
+        None
+    }
+
+    pub fn get_type_by_name(&self, name: String) -> Option<&TypeInfo> {
+        todo!()
+    }
+
+    fn define_type<T: Into<TypeInfo>>(&mut self, type_info: T) -> TypeId {
+        let type_id = self.next_type_id;
+        self.next_type_id = self.next_type_id.next();
+
+        self.id_to_concrete_type.insert(type_id, type_info.into());
+        type_id
+    }
+}
+
+impl Display for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "functions: {:?}", self.functions)?;
+        writeln!(f, "enums: {:?}", self.enums)?;
+        writeln!(f, "structs: {:?}", self.structs)?;
+        writeln!(f, "type id mapping: {:?}", self.id_to_concrete_type)?;
+        writeln!(f, "typedefs: {:?}", self.typedefs)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct TypeId {
+    value: usize,
+}
+
+impl TypeId {
+    pub(super) fn new(value: usize) -> Self {
+        Self { value }
+    }
+
+    pub(super) fn next(&self) -> Self {
+        Self::new(self.value + 1)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum DefineTypeError {
+    #[error(
+        "The type `{0}` was previously defined as `{1:?}`, but was redefined differently as `{2:?}`"
+    )]
+    Redefinition(String, TypeInfo, TypeInfo),
+
+    #[error(transparent)]
+    ForStruct(#[from] StructBuilderError),
+}
+
+pub struct StructBuilder {
+    members: Vec<Member>,
+}
+
+impl StructBuilder {
+    pub fn new() -> Self {
+        Self {
+            members: Vec::default(),
+        }
+    }
+
+    pub fn build(self) -> Struct {
+        Struct {
+            members: self.members,
+        }
+    }
+
+    pub fn member(&mut self, name: String, type_info: Type) -> Result<(), StructBuilderError> {
+        if self.members.iter().any(|member| member.name == name) {
+            return Err(StructBuilderError::DuplicateName(name));
+        }
+
+        self.members.push(Member { name, type_info });
+        Ok(())
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum StructBuilderError {
+    #[error("A member with the name {0} is already defined")]
+    DuplicateName(String),
+}
