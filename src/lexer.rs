@@ -196,9 +196,7 @@ impl<'a> Lexer<'a> {
             return Some(peeked);
         }
 
-        let Some(peeked) = self.next() else {
-            return None;
-        };
+        let peeked = self.next()?;
 
         self.maybe_peeked = Some(peeked);
         Some(peeked)
@@ -232,12 +230,10 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn accept_ident(&mut self) -> Option<&'a str> {
-        let (Token::Ident(identifier), _) = self.peek()? else {
-            return None;
-        };
-
-        self.next();
-        Some(identifier)
+        self.maybe_map_next(|token| match token {
+            Token::Ident(name) => Some(name),
+            _ => None,
+        })
     }
 
     pub fn consume(&mut self) -> Result<TokenInfo<'a>, LexerError<'a>> {
