@@ -67,28 +67,30 @@ impl Program {
     }
 
     pub fn declare_global_var(&mut self, variable: Variable) -> Result<(), DeclareGlobalVarError> {
-        let Some((old_type, old_value)) = self.global_variables.get(&variable.name) else {
-            self.global_variables
-                .insert(variable.name, (variable.var_type, variable.value));
+        if let Some((old_type, old_value)) = self.global_variables.get(&variable.name) {
+            if *old_type != variable.var_type {
+                return Err(DeclareGlobalVarError::RedefinitionDifferingType(
+                    variable.name,
+                    Box::new(self.resolve_concrete_type(old_type.clone()).unwrap()),
+                    Box::new(self.resolve_concrete_type(variable.var_type).unwrap()),
+                ));
+            }
 
-            return Ok(());
+            if variable.value.is_none() {
+                return Ok(());
+            }
+
+            if let (Some(old_value), Some(new_value)) = (old_value, variable.value.clone()) {
+                return Err(DeclareGlobalVarError::RedefinitionReassign(
+                    variable.name,
+                    Box::new(old_value.clone()),
+                    Box::new(new_value),
+                ));
+            }
         };
 
-        if *old_type != variable.var_type {
-            return Err(DeclareGlobalVarError::RedefinitionDifferingType(
-                variable.name,
-                Box::new(self.resolve_concrete_type(old_type.clone()).unwrap()),
-                Box::new(self.resolve_concrete_type(variable.var_type).unwrap()),
-            ));
-        }
-
-        if let (Some(old_value), Some(new_value)) = (old_value, variable.value) {
-            return Err(DeclareGlobalVarError::RedefinitionReassign(
-                variable.name,
-                Box::new(old_value.clone()),
-                Box::new(new_value),
-            ));
-        }
+        self.global_variables
+            .insert(variable.name, (variable.var_type, variable.value));
 
         Ok(())
     }
