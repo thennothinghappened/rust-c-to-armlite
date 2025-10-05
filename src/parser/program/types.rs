@@ -30,6 +30,7 @@ impl From<TypeId> for Type {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltInType {
+    Void,
     Bool,
     Char,
     SignedChar,

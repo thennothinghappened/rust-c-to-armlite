@@ -389,6 +389,7 @@ impl<'a> Parser<'a> {
 
     fn parse_terminal_numeric_type(&mut self) -> Result<BuiltInType, ParseError<'a>> {
         if let Some(basic_type) = self.lexer.maybe_map_next(|token| match token {
+            Token::Void => Some(BuiltInType::Void),
             Token::Bool => Some(BuiltInType::Bool),
             Token::Int => Some(BuiltInType::Int),
             Token::Char => Some(BuiltInType::Char),
