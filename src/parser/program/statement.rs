@@ -1,10 +1,14 @@
-use std::collections::HashMap;
-
-use crate::parser::program::expr::Expr;
+use crate::parser::program::{expr::Expr, types::Type};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
-    Block(Block),
+    Block(Vec<Statement>),
+
+    Declare {
+        var_name: String,
+        var_type: Type,
+        value: Option<Expr>,
+    },
 
     Assign {
         var_name: String,
@@ -21,10 +25,4 @@ pub enum Statement {
         condition: Expr,
         block: Box<Statement>,
     },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Block {
-    variable_types: HashMap<String, usize>,
-    statements: Vec<Statement>,
 }

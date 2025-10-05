@@ -17,6 +17,14 @@ struct AAA b;
 
 int main() {
 	typedef struct A Blah;
+	Blah* a = (void*)(2);
+
+	int blah() {
+
+	}
+
+	blah();
+
 	return 0;
 	;;;
 	

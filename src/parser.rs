@@ -5,7 +5,8 @@ use thiserror::Error;
 use crate::{
     lexer::{self, Lexer, LexerError, LexerErrorKind, Token, TokenInfo},
     parser::program::{
-        statement::{Block, Statement},
+        expr::{BinaryOp, BindingPower, Expr},
+        statement::Statement,
         types::{BuiltInType, Function, Member, Struct, Type, TypeDef, TypeInfo},
         DefineTypeError, Program, StructBuilder, TypeId,
     },
@@ -52,17 +53,23 @@ impl<'a> Parser<'a> {
         Ok(self.program)
     }
 
-    fn parse_func_or_var_decl(&mut self) -> Result<(), ParseError<'a>> {
+    fn parse_func_or_var_decl(&mut self) -> Result<Option<Statement>, ParseError<'a>> {
         // This might be a lone type declaration, or it might be the start of a
         // function, or a variable...
         let initial_type = self.parse_type()?;
 
         if self.lexer.accept(Token::Semicolon) {
             // Lone type definition.
-            return Ok(());
+            return Ok(None);
         }
 
         let (name, this_type) = self.parse_variable_name(initial_type)?;
+
+        if self.lexer.accept(Token::Assign) {
+            // Global variable value.
+            let value = self.parse_expr(0)?;
+            todo!("global variable value");
+        }
 
         if self.lexer.next_is(Token::OpenParen) {
             // Function declaration!
@@ -73,7 +80,7 @@ impl<'a> Parser<'a> {
 
             // May or may not have function body.
             let body = if self.lexer.next_is(Token::OpenCurly) {
-                Some(self.parse_block()?)
+                Some(Box::new(self.parse_block()?))
             } else {
                 self.lexer.expect(Token::Semicolon)?;
                 None
@@ -89,12 +96,7 @@ impl<'a> Parser<'a> {
             // return Ok;
         }
 
-        if self.lexer.accept(Token::Assign) {
-            // Global variable value.
-            todo!("global variable value");
-        }
-
-        todo!()
+        todo!("global var declaration")
     }
 
     fn parse_variable_name(
@@ -143,37 +145,36 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    fn parse_block(&mut self) -> Result<Block, ParseError<'a>> {
+    fn parse_block(&mut self) -> Result<Statement, ParseError<'a>> {
         let mut statements: Vec<Statement> = Vec::new();
+
         self.lexer.expect(Token::OpenCurly)?;
 
         while !self.lexer.accept(Token::CloseCurly) {
-            statements.push(self.parse_statement(todo!())?);
+            statements.push(self.parse_statement()?);
         }
 
-        todo!()
+        Ok(Statement::Block(statements))
     }
 
-    fn parse_statement(
-        &mut self,
-        block_builder: &mut TodoType,
-    ) -> Result<Statement, ParseError<'a>> {
+    fn parse_statement(&mut self) -> Result<Statement, ParseError<'a>> {
         self.consume_semicolons();
 
         match self.peek_token()?.0 {
             Token::Semicolon => {
                 self.lexer.next();
-                self.parse_statement(block_builder)
+                self.parse_statement()
             }
 
-            Token::If => todo!("if statement"),
+            Token::If => {
+                self.lexer.next();
+                todo!("parse if expression")
+            }
+
             Token::While => todo!("while statement"),
             Token::Return => todo!("return statement"),
-            _ => {
-                let var_decl = self.parse_variable_decl()?;
 
-                self.parse_statement(todo!("parse var decl or something"))
-            }
+            _ => self.parse_variable_decl(),
         }
     }
 
@@ -181,8 +182,52 @@ impl<'a> Parser<'a> {
         while self.lexer.accept(Token::Semicolon) {}
     }
 
-    fn parse_variable_decl(&mut self) -> Result<Vec<Member>, ParseError<'a>> {
-        todo!()
+    fn parse_variable_decl(&mut self) -> Result<Statement, ParseError<'a>> {
+        let initial_type = self.parse_type()?;
+
+        // todo: support multiple decls on same line (ew)
+        let (var_name, var_type) = self.parse_variable_name(initial_type)?;
+
+        let value = if self.lexer.accept(Token::Assign) {
+            Some(self.parse_expr(0)?)
+        } else {
+            None
+        };
+
+        self.lexer.expect(Token::Semicolon)?;
+
+        Ok(Statement::Declare {
+            var_name,
+            var_type,
+            value,
+        })
+    }
+
+    fn parse_expr(&mut self, min_power: i32) -> Result<Expr, ParseError<'a>> {
+        let mut lhs = self.parse_unary_expr(0)?;
+
+        while let Some(op) = self.lexer.maybe_map_next(|token| {
+            BinaryOp::try_from(token)
+                .ok()
+                .filter(|op| op.binding_power() >= min_power)
+        }) {
+            lhs = Expr::BinaryOp(
+                op,
+                Box::new(lhs),
+                Box::new(self.parse_expr(op.binding_power())?),
+            );
+        }
+
+        Ok(lhs)
+    }
+
+    fn parse_unary_expr(&mut self, min_power: i32) -> Result<Expr, ParseError<'a>> {
+        // todo: actually parse unary ops rather than expecting terminal
+        match self.next_token()?.0 {
+            Token::Ident(name) => Ok(Expr::Reference(name.to_string())),
+            Token::StringLiteral(content) => Ok(Expr::StringLiteral(content.to_string())),
+            _ => Err(self.unexpected_token()),
+        }
     }
 
     fn parse_typedef(&mut self) -> Result<(), ParseError<'a>> {
@@ -295,6 +340,7 @@ impl<'a> Parser<'a> {
 
     fn parse_terminal_numeric_type(&mut self) -> Result<BuiltInType, ParseError<'a>> {
         if let Some(basic_type) = self.lexer.maybe_map_next(|token| match token {
+            Token::Bool => Some(BuiltInType::Bool),
             Token::Int => Some(BuiltInType::Int),
             Token::Char => Some(BuiltInType::Char),
             Token::Float => Some(BuiltInType::Float),

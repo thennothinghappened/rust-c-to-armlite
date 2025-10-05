@@ -73,10 +73,6 @@ impl Program {
         None
     }
 
-    pub fn get_type_by_name(&self, name: &str) -> Option<&TypeInfo> {
-        todo!()
-    }
-
     fn define_type<T: Into<TypeInfo>>(&mut self, type_info: T) -> TypeId {
         let type_id = self.next_type_id;
         self.next_type_id = self.next_type_id.next();
