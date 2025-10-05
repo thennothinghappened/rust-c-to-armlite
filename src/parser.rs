@@ -216,7 +216,11 @@ impl<'a> Parser<'a> {
 
             Token::Return => {
                 self.lexer.next();
-                Ok(Statement::Return(Box::new(self.parse_expr(0)?)))
+
+                let value = self.parse_expr(0)?;
+                self.lexer.expect(Token::Semicolon)?;
+
+                Ok(Statement::Return(Box::new(value)))
             }
 
             _ => self.parse_variable_decl(),
