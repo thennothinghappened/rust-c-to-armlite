@@ -75,7 +75,7 @@ impl BuiltInType {
     /// Convert this type to a signed version, if one exists.
     pub fn signed(self) -> Option<Self> {
         match self {
-            Self::UnsignedChar => Some(Self::Char),
+            Self::UnsignedChar => Some(Self::SignedChar),
             Self::UnsignedShort => Some(Self::Short),
             Self::UnsignedInt => Some(Self::Int),
             Self::UnsignedLong => Some(Self::Long),
