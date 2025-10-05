@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::Range, str::Chars};
+use std::{fmt::Display, str::Chars};
 
 use thiserror::Error;
 

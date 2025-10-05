@@ -1,14 +1,12 @@
-use std::{collections::HashMap, fmt::Display, ops::Range, str::Chars};
-
 use thiserror::Error;
 
 use crate::{
-    lexer::{self, Lexer, LexerError, LexerErrorKind, Token, TokenInfo},
+    lexer::{Lexer, LexerError, LexerErrorKind, Token, TokenInfo},
     parser::program::{
         expr::{BinaryOp, BindingPower, Expr},
         statement::{Statement, Variable},
         types::{BuiltInType, Function, Member, Struct, Type, TypeDef, TypeInfo},
-        DefineTypeError, Program, StructBuilder, TypeId,
+        DefineTypeError, Program, StructBuilder,
     },
     span::Span,
 };

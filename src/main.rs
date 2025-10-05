@@ -9,10 +9,7 @@ use codespan_reporting::{
     },
 };
 
-use crate::{
-    lexer::{Lexer, Token, TokenInfo},
-    parser::Parser,
-};
+use crate::{lexer::Lexer, parser::Parser};
 
 mod lexer;
 mod parser;
