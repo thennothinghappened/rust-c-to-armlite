@@ -8,19 +8,21 @@ pub enum Statement {
 
     Assign {
         var_name: String,
-        value: Expr,
+        value: Box<Expr>,
     },
 
     If {
-        condition: Expr,
+        condition: Box<Expr>,
         if_true: Box<Statement>,
         if_false: Option<Box<Statement>>,
     },
 
     While {
-        condition: Expr,
+        condition: Box<Expr>,
         block: Box<Statement>,
     },
+
+    Return(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

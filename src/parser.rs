@@ -187,7 +187,7 @@ impl<'a> Parser<'a> {
 
                 if !self.lexer.accept(Token::Else) {
                     return Ok(Statement::If {
-                        condition,
+                        condition: Box::new(condition),
                         if_true: Box::new(if_true),
                         if_false: None,
                     });
@@ -196,14 +196,28 @@ impl<'a> Parser<'a> {
                 let if_false = self.parse_statement()?;
 
                 Ok(Statement::If {
-                    condition,
+                    condition: Box::new(condition),
                     if_true: Box::new(if_true),
                     if_false: Some(Box::new(if_false)),
                 })
             }
 
-            Token::While => todo!("while statement"),
-            Token::Return => todo!("return statement"),
+            Token::While => {
+                self.lexer.next();
+
+                let condition = self.parse_expr(0)?;
+                let block = self.parse_statement()?;
+
+                Ok(Statement::While {
+                    condition: Box::new(condition),
+                    block: Box::new(block),
+                })
+            }
+
+            Token::Return => {
+                self.lexer.next();
+                Ok(Statement::Return(Box::new(self.parse_expr(0)?)))
+            }
 
             _ => self.parse_variable_decl(),
         }
