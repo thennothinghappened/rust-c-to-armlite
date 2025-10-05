@@ -1,34 +1,13 @@
 
-struct A {
-	int a;
-};
+typedef unsigned long long uint64_t;
 
-union Blah {
-	struct A a, *b;
-};
+typedef struct
+{
+	uint64_t length;
+	char* buf;
+} String;
 
-struct AAA;
-struct AAA { int; struct AAA* a; } a;
-struct AAA b;
-
-int ba = 2;
-int ba = 3;
-
-// int stuff(int ***a, b) {
-	
-// }
 
 int main() {
-	typedef struct A Blah;
-	Blah* a = (void*)(2);
-
-	// int blah() {
-
-	// }
-
-	// blah();
-
-	return 0;
-	;;;
-	
+	return "hi";
 }

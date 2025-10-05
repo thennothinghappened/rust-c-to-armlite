@@ -21,7 +21,7 @@ pub struct Program {
     global_variables: HashMap<String, (Type, Option<Expr>)>,
     structs: HashMap<String, TypeId>,
     enums: HashMap<String, TypeId>,
-    typedefs: HashMap<String, Type>,
+    typedefs: HashMap<String, TypeId>,
     id_to_concrete_type: HashMap<TypeId, TypeInfo>,
     next_type_id: TypeId,
 }
@@ -30,8 +30,18 @@ impl Program {
     /// Declare that the given type name refers to a specific type, whether declared inline, or an
     /// known existing type.
     pub fn typedef(&mut self, typedef: TypeDef) -> Result<(), DefineTypeError> {
-        self.typedefs.insert(typedef.name, typedef.target_type);
+        let id = match typedef.target_type {
+            Type::Inline(type_info) => self.define_type(type_info),
+            Type::WithId(id) => id,
+        };
+
+        self.typedefs.insert(typedef.name, id);
         Ok(())
+    }
+
+    /// Resolve a user-defined type from its name, if it exists.
+    pub fn typedef_get_id(&mut self, name: &str) -> Option<&TypeId> {
+        self.typedefs.get(name)
     }
 
     pub fn declare_named_struct(
@@ -44,7 +54,7 @@ impl Program {
             .get(&name)
             .and_then(|id| Some((id, self.get_struct_by_id(id)?)))
         else {
-            let id = self.define_type(struct_type);
+            let id = self.define_type(struct_type.into());
             self.structs.insert(name, id);
 
             return Ok(id);
@@ -123,7 +133,7 @@ impl Program {
         None
     }
 
-    fn define_type<T: Into<TypeInfo>>(&mut self, type_info: T) -> TypeId {
+    pub fn define_type(&mut self, type_info: TypeInfo) -> TypeId {
         let type_id = self.next_type_id;
         self.next_type_id = self.next_type_id.next();
 

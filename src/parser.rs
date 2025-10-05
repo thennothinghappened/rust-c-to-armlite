@@ -363,6 +363,16 @@ impl<'a> Parser<'a> {
             // Inline struct type.
             Token::Struct => self.parse_struct(),
 
+            // Typedef'd something-or-other!
+            Token::Ident(name) => {
+                self.lexer.next();
+
+                self.program
+                    .typedef_get_id(name)
+                    .map(|&id| Type::WithId(id))
+                    .ok_or_else(|| self.unexpected_token())
+            }
+
             // Maybe we've got a number?
             _ => self
                 .parse_numeric_type()
