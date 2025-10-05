@@ -181,7 +181,25 @@ impl<'a> Parser<'a> {
 
             Token::If => {
                 self.lexer.next();
-                todo!("parse if expression")
+
+                let condition = self.parse_expr(0)?;
+                let if_true = self.parse_statement()?;
+
+                if !self.lexer.accept(Token::Else) {
+                    return Ok(Statement::If {
+                        condition,
+                        if_true: Box::new(if_true),
+                        if_false: None,
+                    });
+                };
+
+                let if_false = self.parse_statement()?;
+
+                Ok(Statement::If {
+                    condition,
+                    if_true: Box::new(if_true),
+                    if_false: Some(Box::new(if_false)),
+                })
             }
 
             Token::While => todo!("while statement"),
