@@ -4,7 +4,7 @@ use crate::parser::program::expr::call::Call;
 
 pub mod call;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     StringLiteral(String),
     Reference(String),

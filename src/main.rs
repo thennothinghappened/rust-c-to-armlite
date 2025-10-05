@@ -26,7 +26,14 @@ fn main() {
 
     loop {
         let mut buf = String::new();
-        stdin.read_line(&mut buf).unwrap();
+
+        loop {
+            stdin.read_line(&mut buf).unwrap();
+
+            if buf.trim_end().ends_with(";;") {
+                break;
+            }
+        }
 
         let lexer = Lexer::new(&buf);
         let parser = Parser::new(lexer);

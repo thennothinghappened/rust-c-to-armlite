@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::parser::program::expr::Expr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Block(Block),
 
@@ -23,7 +23,7 @@ pub enum Statement {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     variable_types: HashMap<String, usize>,
     statements: Vec<Statement>,

@@ -2,7 +2,7 @@ use std::{fmt::Display, rc::Rc};
 
 use crate::parser::program::expr::Expr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Call {
     target: Rc<Expr>,
     args: Vec<Expr>,

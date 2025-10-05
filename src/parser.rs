@@ -5,13 +5,15 @@ use thiserror::Error;
 use crate::{
     lexer::{self, Lexer, LexerError, LexerErrorKind, Token, TokenInfo},
     parser::program::{
-        statement::Statement,
-        types::{BuiltInType, Type, TypeDef, TypeInfo},
+        statement::{Block, Statement},
+        types::{BuiltInType, Function, Member, Struct, Type, TypeDef, TypeInfo},
         DefineTypeError, Program, StructBuilder, TypeId,
     },
     span::Span,
 };
 pub mod program;
+
+enum TodoType {}
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -31,10 +33,10 @@ impl<'a> Parser<'a> {
     /// 2. Global variables.
     /// 3. Function declarations (& definitions.)
     pub fn parse(mut self) -> Result<Program, ParseError<'a>> {
-        while let Some((token, location)) = self.lexer.peek() {
+        while let Some((token, _)) = self.lexer.peek() {
             match token {
-                Token::Struct => {
-                    self.parse_struct()?;
+                Token::Semicolon => {
+                    self.lexer.next();
                 }
 
                 Token::TypeDef => {
@@ -42,11 +44,7 @@ impl<'a> Parser<'a> {
                 }
 
                 _ => {
-                    // Only valid options now are function or global var decl. Both start with a
-                    // type.
-                    let type_of_next_thing = self.parse_type()?;
-
-                    todo!()
+                    self.parse_func_or_var_decl()?;
                 }
             };
         }
@@ -54,37 +52,150 @@ impl<'a> Parser<'a> {
         Ok(self.program)
     }
 
-    fn parse_statement(&mut self) -> Result<Statement, ParseError<'a>> {
-        // if let Token::Ident(ident) = self.lexer.peek()? {
-        //     if let Some(type_info) = self.parse_type() {
-        //         // This is either a global variable or a function. Keep reading!
-        //         let Some(TokenInfo {
-        //             token: Token::Ident(global_name),
-        //             span: _,
-        //         }) = self.lexer.next()
-        //         else {
-        //             return Some(Err(ParseError { span: (), kind: () }));
-        //         };
+    fn parse_func_or_var_decl(&mut self) -> Result<(), ParseError<'a>> {
+        // This might be a lone type declaration, or it might be the start of a
+        // function, or a variable...
+        let initial_type = self.parse_type()?;
 
-        //         if self.lexer.accept(Token::OpenParen).is_some() {
-        //             // Function declaration!
-        //             // let args =
-        //         } else if self.lexer.accept(Token::Assign).is_some() {
-        //             // Variable assignment!
-        //         }
-        //     }
-        // }
+        if self.lexer.accept(Token::Semicolon) {
+            // Lone type definition.
+            return Ok(());
+        }
 
+        let (name, this_type) = self.parse_variable_name(initial_type)?;
+
+        if self.lexer.next_is(Token::OpenParen) {
+            // Function declaration!
+            let return_type = this_type;
+
+            // Parse args.
+            let args = self.parse_func_decl_args()?;
+
+            // May or may not have function body.
+            let body = if self.lexer.next_is(Token::OpenCurly) {
+                Some(self.parse_block()?)
+            } else {
+                self.lexer.expect(Token::Semicolon)?;
+                None
+            };
+
+            let func = Function {
+                args,
+                return_type: Box::new(return_type),
+                body,
+            };
+
+            todo!("deal with function `{name}` ({func:?})");
+            // return Ok;
+        }
+
+        if self.lexer.accept(Token::Assign) {
+            // Global variable value.
+            todo!("global variable value");
+        }
+
+        todo!()
+    }
+
+    fn parse_variable_name(
+        &mut self,
+        initial_type: Type,
+    ) -> Result<(String, Type), ParseError<'a>> {
+        let this_type = self.parse_type_pointersssss(initial_type)?;
+        let name = self.lexer.consume_ident()?;
+
+        Ok((name.to_string(), this_type))
+    }
+
+    fn parse_type_pointersssss(&mut self, initial_type: Type) -> Result<Type, ParseError<'a>> {
+        let mut this_type = initial_type;
+
+        // Evil right-associative pointer syntax >:(((
+        while self.lexer.accept(Token::Star) {
+            this_type = TypeInfo::Pointer(Box::new(this_type)).into();
+        }
+
+        Ok(this_type)
+    }
+
+    fn parse_func_decl_args(&mut self) -> Result<Vec<Member>, ParseError<'a>> {
+        let mut args: Vec<Member> = Vec::new();
+
+        self.lexer.expect(Token::OpenParen)?;
+
+        while !self.lexer.accept(Token::CloseParen) {
+            let initial_type = self.parse_type()?;
+            let arg_type = self.parse_type_pointersssss(initial_type)?;
+            let arg_name = self.lexer.accept_ident();
+
+            args.push(Member {
+                name: arg_name.map(str::to_string),
+                type_info: arg_type,
+            });
+
+            if self.lexer.accept(Token::CloseParen) {
+                break;
+            }
+
+            self.lexer.expect(Token::Comma)?;
+        }
+
+        Ok(args)
+    }
+
+    fn parse_block(&mut self) -> Result<Block, ParseError<'a>> {
+        let mut statements: Vec<Statement> = Vec::new();
+        self.lexer.expect(Token::OpenCurly)?;
+
+        while !self.lexer.accept(Token::CloseCurly) {
+            statements.push(self.parse_statement(todo!())?);
+        }
+
+        todo!()
+    }
+
+    fn parse_statement(
+        &mut self,
+        block_builder: &mut TodoType,
+    ) -> Result<Statement, ParseError<'a>> {
+        self.consume_semicolons();
+
+        match self.peek_token()?.0 {
+            Token::Semicolon => {
+                self.lexer.next();
+                self.parse_statement(block_builder)
+            }
+
+            Token::If => todo!("if statement"),
+            Token::While => todo!("while statement"),
+            Token::Return => todo!("return statement"),
+            _ => {
+                let var_decl = self.parse_variable_decl()?;
+
+                self.parse_statement(todo!("parse var decl or something"))
+            }
+        }
+    }
+
+    fn consume_semicolons(&mut self) {
+        while self.lexer.accept(Token::Semicolon) {}
+    }
+
+    fn parse_variable_decl(&mut self) -> Result<Vec<Member>, ParseError<'a>> {
         todo!()
     }
 
     fn parse_typedef(&mut self) -> Result<(), ParseError<'a>> {
         self.lexer.expect(Token::TypeDef)?;
 
-        let target_type = self.parse_type()?;
+        let initial_type = self.parse_type()?;
+        let pointer_type = self.parse_type_pointersssss(initial_type)?;
         let name = self.lexer.consume_ident()?.to_string();
 
-        let typedef = TypeDef { name, target_type };
+        let typedef = TypeDef {
+            name,
+            target_type: pointer_type,
+        };
 
         self.program
             .typedef(typedef)
@@ -96,21 +207,41 @@ impl<'a> Parser<'a> {
 
     fn parse_struct(&mut self) -> Result<Type, ParseError<'a>> {
         let start = self.lexer.expect(Token::Struct)?;
-
         let struct_name = self.lexer.accept_ident().map(str::to_string);
 
-        self.lexer.expect(Token::OpenCurly)?;
+        if !self.lexer.accept(Token::OpenCurly) {
+            let Some(struct_name) = struct_name else {
+                return Err(self.bad_definition(
+                    start.until(self.lexer.index),
+                    ParseStructError::UnnamedReference,
+                ));
+            };
+
+            // Opaque struct.
+            return self
+                .program
+                .declare_named_struct(struct_name, Struct::opaque())
+                .map(|id| id.into())
+                .map_err(|err| self.bad_definition(start.until(self.lexer.index), err));
+        }
+
         let mut builder = StructBuilder::new();
 
         while !self.lexer.accept(Token::CloseCurly) {
             // Parse each member!
+            let start_pos = self.lexer.index;
+
             let member_type = self.parse_type()?;
-            let member_name = self.lexer.consume_ident()?;
+            let (member_name, member_type) = self.parse_variable_name(member_type)?;
             self.lexer.expect(Token::Semicolon)?;
 
+            let end_pos = self.lexer.index;
+
             builder
-                .member(member_name.to_string(), member_type)
-                .map_err(|err| self.bad_definition(todo!(), err.into()))?;
+                .member(Some(member_name), member_type)
+                .map_err(|err| {
+                    self.bad_definition(Span::new(start_pos, end_pos), DefineTypeError::from(err))
+                })?;
         }
 
         match struct_name {
@@ -229,10 +360,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn bad_definition(&self, span: Span, err: DefineTypeError) -> ParseError<'a> {
+    fn bad_definition<S: Into<Span>, E: Into<ParseErrorKind<'a>>>(
+        &self,
+        location: S,
+        err: E,
+    ) -> ParseError<'a> {
         ParseError {
-            location: span,
-            kind: ParseErrorKind::DefineTypeError(err),
+            location: location.into(),
+            kind: err.into(),
         }
     }
 }
@@ -259,7 +394,10 @@ pub enum ParseErrorKind<'a> {
     EarlyEof,
 
     #[error(transparent)]
-    DefineTypeError(DefineTypeError),
+    ParseStructError(#[from] ParseStructError),
+
+    #[error(transparent)]
+    DefineTypeError(#[from] DefineTypeError),
 }
 
 impl<'a> From<LexerError<'a>> for ParseError<'a> {
@@ -282,8 +420,8 @@ impl<'a> From<LexerErrorKind<'a>> for ParseErrorKind<'a> {
     }
 }
 
-impl<'a> From<DefineTypeError> for ParseErrorKind<'a> {
-    fn from(value: DefineTypeError) -> Self {
-        Self::DefineTypeError(value)
-    }
+#[derive(Debug, Error)]
+pub enum ParseStructError {
+    #[error("Reference to a struct without a name")]
+    UnnamedReference,
 }

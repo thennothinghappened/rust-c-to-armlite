@@ -1,5 +1,4 @@
-use core::error;
-use std::{collections::HashMap, fmt::Display, rc::Rc};
+use std::{collections::HashMap, fmt::Display};
 
 use thiserror::Error;
 
@@ -44,10 +43,18 @@ impl Program {
         };
 
         if *existing_struct != struct_type {
+            if existing_struct.members.is_none() {
+                // We're giving a concrete definition to an existing opaque struct.
+                self.id_to_concrete_type
+                    .insert(existing_id, struct_type.into());
+
+                return Ok(existing_id);
+            }
+
             return Err(DefineTypeError::Redefinition(
                 name,
-                existing_struct.clone().into(),
-                struct_type.into(),
+                Box::new(existing_struct.clone().into()),
+                Box::new(struct_type.into()),
             ));
         }
 
@@ -110,7 +117,7 @@ pub enum DefineTypeError {
     #[error(
         "The type `{0}` was previously defined as `{1:?}`, but was redefined differently as `{2:?}`"
     )]
-    Redefinition(String, TypeInfo, TypeInfo),
+    Redefinition(String, Box<TypeInfo>, Box<TypeInfo>),
 
     #[error(transparent)]
     ForStruct(#[from] StructBuilderError),
@@ -129,13 +136,19 @@ impl StructBuilder {
 
     pub fn build(self) -> Struct {
         Struct {
-            members: self.members,
+            members: Some(self.members),
         }
     }
 
-    pub fn member(&mut self, name: String, type_info: Type) -> Result<(), StructBuilderError> {
-        if self.members.iter().any(|member| member.name == name) {
-            return Err(StructBuilderError::DuplicateName(name));
+    pub fn member(
+        &mut self,
+        name: Option<String>,
+        type_info: Type,
+    ) -> Result<(), StructBuilderError> {
+        if let Some(definite_name) = &name {
+            if self.members.iter().any(|member| member.name == name) {
+                return Err(StructBuilderError::DuplicateName(definite_name.clone()));
+            }
         }
 
         self.members.push(Member { name, type_info });

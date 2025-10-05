@@ -1,18 +1,18 @@
-use crate::parser::program::{statement::Statement, TypeId};
+use crate::parser::program::{statement::Block, TypeId};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Inline(TypeInfo),
     WithId(TypeId),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeInfo {
     Pointer(Box<Type>),
     BuiltIn(BuiltInType),
     Struct(Struct),
     Enum(Enum),
-    Function(FunctionType),
+    Function(Function),
     Const(Box<Type>),
 }
 
@@ -85,16 +85,22 @@ impl BuiltInType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FunctionType {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Function {
     pub args: Vec<Member>,
-    pub return_type_id: TypeId,
-    // pub body: Option<Statement>,
+    pub return_type: Box<Type>,
+    pub body: Option<Block>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
-    pub members: Vec<Member>,
+    pub members: Option<Vec<Member>>,
+}
+
+impl Struct {
+    pub fn opaque() -> Self {
+        Self { members: None }
+    }
 }
 
 impl From<Struct> for TypeInfo {
@@ -103,9 +109,9 @@ impl From<Struct> for TypeInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Member {
-    pub name: String,
+    pub name: Option<String>,
     pub type_info: Type,
 }
 

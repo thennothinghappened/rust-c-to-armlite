@@ -12,6 +12,7 @@ pub(crate) enum Token<'a> {
     OpenCurly,
     CloseCurly,
     Ampersand,
+    Comma,
     Star,
     Assign,
     BooleanEqual,
@@ -50,6 +51,7 @@ impl<'a> TryFrom<Token<'a>> for &'static str {
             Token::CloseCurly => "}",
             Token::Ampersand => "&",
             Token::Star => "*",
+            Token::Comma => ",",
             Token::Assign => "=",
             Token::BooleanEqual => "==",
             Token::If => "if",
@@ -132,6 +134,7 @@ impl<'a> Lexer<'a> {
                 ';' => Some(Token::Semicolon),
                 '&' => Some(Token::Ampersand),
                 '*' => Some(Token::Star),
+                ',' => Some(Token::Comma),
                 _ => None,
             };
 
@@ -227,6 +230,12 @@ impl<'a> Lexer<'a> {
 
     pub fn accept(&mut self, expected: Token<'a>) -> bool {
         self.next_if(|token| token == expected).is_some()
+    }
+
+    pub fn next_is(&mut self, expected: Token<'a>) -> bool {
+        self.peek()
+            .map(|(token, _)| token == expected)
+            .unwrap_or(false)
     }
 
     pub fn accept_ident(&mut self) -> Option<&'a str> {
