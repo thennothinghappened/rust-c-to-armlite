@@ -2,7 +2,11 @@ use std::{collections::HashMap, fmt::Display};
 
 use thiserror::Error;
 
-use crate::parser::program::types::{Member, Struct, Type, TypeDef, TypeInfo};
+use crate::parser::program::{
+    expr::Expr,
+    statement::Variable,
+    types::{Function, Member, Struct, Type, TypeDef, TypeInfo},
+};
 
 pub mod expr;
 pub mod statement;
@@ -10,7 +14,8 @@ pub mod types;
 
 #[derive(Default)]
 pub struct Program {
-    functions: HashMap<String, TypeId>,
+    functions: HashMap<String, Function>,
+    global_variables: HashMap<String, (Type, Option<Expr>)>,
     structs: HashMap<String, TypeId>,
     enums: HashMap<String, TypeId>,
     typedefs: HashMap<String, Type>,
@@ -61,6 +66,40 @@ impl Program {
         Ok(existing_id)
     }
 
+    pub fn declare_global_var(&mut self, variable: Variable) -> Result<(), DeclareGlobalVarError> {
+        let Some((old_type, old_value)) = self.global_variables.get(&variable.name) else {
+            self.global_variables
+                .insert(variable.name, (variable.var_type, variable.value));
+
+            return Ok(());
+        };
+
+        if *old_type != variable.var_type {
+            return Err(DeclareGlobalVarError::RedefinitionDifferingType(
+                variable.name,
+                Box::new(self.resolve_concrete_type(old_type.clone()).unwrap()),
+                Box::new(self.resolve_concrete_type(variable.var_type).unwrap()),
+            ));
+        }
+
+        if let (Some(old_value), Some(new_value)) = (old_value, variable.value) {
+            return Err(DeclareGlobalVarError::RedefinitionReassign(
+                variable.name,
+                Box::new(old_value.clone()),
+                Box::new(new_value),
+            ));
+        }
+
+        todo!()
+    }
+
+    pub fn resolve_concrete_type(&self, ref_type: Type) -> Option<TypeInfo> {
+        match ref_type {
+            Type::Inline(type_info) => Some(type_info),
+            Type::WithId(id) => Some(self.get_type_by_id(&id)?.clone()),
+        }
+    }
+
     pub fn get_type_by_id(&self, id: &TypeId) -> Option<&TypeInfo> {
         self.id_to_concrete_type.get(id)
     }
@@ -85,6 +124,7 @@ impl Program {
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "functions: {:?}", self.functions)?;
+        writeln!(f, "global vars: {:?}", self.global_variables)?;
         writeln!(f, "enums: {:?}", self.enums)?;
         writeln!(f, "structs: {:?}", self.structs)?;
         writeln!(f, "type id mapping: {:?}", self.id_to_concrete_type)?;
@@ -106,6 +146,15 @@ impl TypeId {
     pub(super) fn next(&self) -> Self {
         Self::new(self.value + 1)
     }
+}
+
+#[derive(Debug, Error)]
+pub enum DeclareGlobalVarError {
+    #[error("Variable `{0}` was previously defined with the type `{1:?}`, but was redefined with type `{2:?}`")]
+    RedefinitionDifferingType(String, Box<TypeInfo>, Box<TypeInfo>),
+
+    #[error("Variable `{0}` was previously initialised as `{1:?}`, but was re-defined with a new initialised value of `{2:?}`")]
+    RedefinitionReassign(String, Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Error)]

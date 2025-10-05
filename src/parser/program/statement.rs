@@ -4,11 +4,7 @@ use crate::parser::program::{expr::Expr, types::Type};
 pub enum Statement {
     Block(Vec<Statement>),
 
-    Declare {
-        var_name: String,
-        var_type: Type,
-        value: Option<Expr>,
-    },
+    Declare(Variable),
 
     Assign {
         var_name: String,
@@ -25,4 +21,11 @@ pub enum Statement {
         condition: Expr,
         block: Box<Statement>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variable {
+    pub name: String,
+    pub var_type: Type,
+    pub value: Option<Expr>,
 }

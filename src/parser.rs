@@ -6,7 +6,7 @@ use crate::{
     lexer::{self, Lexer, LexerError, LexerErrorKind, Token, TokenInfo},
     parser::program::{
         expr::{BinaryOp, BindingPower, Expr},
-        statement::Statement,
+        statement::{Statement, Variable},
         types::{BuiltInType, Function, Member, Struct, Type, TypeDef, TypeInfo},
         DefineTypeError, Program, StructBuilder, TypeId,
     },
@@ -45,7 +45,17 @@ impl<'a> Parser<'a> {
                 }
 
                 _ => {
-                    self.parse_func_or_var_decl()?;
+                    let Some(statement) = self.parse_func_or_var_decl()? else {
+                        continue;
+                    };
+
+                    match statement {
+                        Statement::Declare(variable) => {
+                            self.program.declare_global_var(variable).unwrap();
+                        }
+
+                        _ => panic!("Invalid top-level statement {statement:?}"),
+                    }
                 }
             };
         }
@@ -64,12 +74,6 @@ impl<'a> Parser<'a> {
         }
 
         let (name, this_type) = self.parse_variable_name(initial_type)?;
-
-        if self.lexer.accept(Token::Assign) {
-            // Global variable value.
-            let value = self.parse_expr(0)?;
-            todo!("global variable value");
-        }
 
         if self.lexer.next_is(Token::OpenParen) {
             // Function declaration!
@@ -96,7 +100,18 @@ impl<'a> Parser<'a> {
             // return Ok;
         }
 
-        todo!("global var declaration")
+        // Global variable decl (optionally with initial value!)
+        let value = if self.lexer.accept(Token::Assign) {
+            Some(self.parse_expr(0)?)
+        } else {
+            None
+        };
+
+        Ok(Some(Statement::Declare(Variable {
+            name,
+            var_type: this_type,
+            value,
+        })))
     }
 
     fn parse_variable_name(
@@ -196,11 +211,11 @@ impl<'a> Parser<'a> {
 
         self.lexer.expect(Token::Semicolon)?;
 
-        Ok(Statement::Declare {
-            var_name,
+        Ok(Statement::Declare(Variable {
+            name: var_name,
             var_type,
             value,
-        })
+        }))
     }
 
     fn parse_expr(&mut self, min_power: i32) -> Result<Expr, ParseError<'a>> {

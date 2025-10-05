@@ -11,6 +11,9 @@ struct AAA;
 struct AAA { int; struct AAA* a; } a;
 struct AAA b;
 
+int ba = 2;
+int ba = 3;
+
 // int stuff(int ***a, b) {
 	
 // }
@@ -19,11 +22,11 @@ int main() {
 	typedef struct A Blah;
 	Blah* a = (void*)(2);
 
-	int blah() {
+	// int blah() {
 
-	}
+	// }
 
-	blah();
+	// blah();
 
 	return 0;
 	;;;
