@@ -2,10 +2,13 @@ use std::{collections::HashMap, fmt::Display};
 
 use thiserror::Error;
 
-use crate::parser::program::{
-    expr::Expr,
-    statement::Variable,
-    types::{Function, Member, Struct, Type, TypeDef, TypeInfo},
+use crate::parser::{
+    program::{
+        expr::Expr,
+        statement::Variable,
+        types::{Function, Member, Struct, Type, TypeDef, TypeInfo},
+    },
+    TodoType,
 };
 
 pub mod expr;
@@ -64,6 +67,12 @@ impl Program {
         }
 
         Ok(existing_id)
+    }
+
+    pub fn declare_function(&mut self, name: String, function: Function) -> Result<(), TodoType> {
+        // todo: error checking!
+        self.functions.insert(name, function);
+        Ok(())
     }
 
     pub fn declare_global_var(&mut self, variable: Variable) -> Result<(), DeclareGlobalVarError> {

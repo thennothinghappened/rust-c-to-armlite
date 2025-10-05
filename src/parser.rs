@@ -14,7 +14,7 @@ use crate::{
 };
 pub mod program;
 
-enum TodoType {}
+pub enum TodoType {}
 
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -96,8 +96,8 @@ impl<'a> Parser<'a> {
                 body,
             };
 
-            todo!("deal with function `{name}` ({func:?})");
-            // return Ok;
+            self.program.declare_function(name, func);
+            return Ok(None);
         }
 
         // Global variable decl (optionally with initial value!)
