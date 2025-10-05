@@ -162,6 +162,7 @@ impl<'a> Parser<'a> {
         let mut statements: Vec<Statement> = Vec::new();
 
         self.lexer.expect(Token::OpenCurly)?;
+        self.consume_semicolons();
 
         while !self.lexer.accept(Token::CloseCurly) {
             statements.push(self.parse_statement()?);
