@@ -74,6 +74,8 @@ impl<'a> TryFrom<Token<'a>> for &'static str {
             Token::Char => "char",
             Token::Float => "float",
             Token::Double => "double",
+            Token::Void => "void",
+            Token::Const => "const",
             Token::QuestionMark => "?",
             Token::Colon => ":",
             _ => return Err(()),
@@ -189,6 +191,8 @@ impl<'a> Lexer<'a> {
                     "char" => Some(Token::Char),
                     "float" => Some(Token::Float),
                     "double" => Some(Token::Double),
+                    "void" => Some(Token::Void),
+                    "const" => Some(Token::Const),
                     _ => None,
                 } {
                     break 'get_token token;
