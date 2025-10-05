@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::{Debug, Display},
+};
 
 use thiserror::Error;
 
@@ -90,8 +93,8 @@ impl Program {
             if *old_type != variable.var_type {
                 return Err(DeclareGlobalVarError::RedefinitionDifferingType(
                     variable.name,
-                    Box::new(self.resolve_concrete_type(old_type.clone()).unwrap()),
-                    Box::new(self.resolve_concrete_type(variable.var_type).unwrap()),
+                    Box::new(self.resolve_concrete_type(&old_type.clone()).unwrap()),
+                    Box::new(self.resolve_concrete_type(&variable.var_type).unwrap()),
                 ));
             }
 
@@ -114,10 +117,10 @@ impl Program {
         Ok(())
     }
 
-    pub fn resolve_concrete_type(&self, ref_type: Type) -> Option<TypeInfo> {
+    pub fn resolve_concrete_type(&self, ref_type: &Type) -> Option<TypeInfo> {
         match ref_type {
-            Type::Inline(type_info) => Some(type_info),
-            Type::WithId(id) => Some(self.get_type_by_id(&id)?.clone()),
+            Type::Inline(type_info) => Some(type_info.clone()),
+            Type::WithId(id) => Some(self.get_type_by_id(id)?.clone()),
         }
     }
 
@@ -137,19 +140,115 @@ impl Program {
         let type_id = self.next_type_id;
         self.next_type_id = self.next_type_id.next();
 
-        self.id_to_concrete_type.insert(type_id, type_info.into());
+        self.id_to_concrete_type.insert(type_id, type_info);
         type_id
+    }
+
+    fn format_type(&self, ref_type: &Type) -> String {
+        let mut encountered_types: HashSet<TypeId> = HashSet::new();
+        self.format_type_inner(ref_type, &mut encountered_types)
+    }
+
+    fn get_struct_name(&self, id: &TypeId) -> Option<&str> {
+        Some(
+            self.structs
+                .iter()
+                .find(|(_, some_id)| *some_id == id)?
+                .0
+                .as_str(),
+        )
+    }
+
+    fn format_type_inner(
+        &self,
+        ref_type: &Type,
+        encountered_types: &mut HashSet<TypeId>,
+    ) -> String {
+        let (type_info, id) = match ref_type {
+            Type::Inline(type_info) => (type_info.clone(), None),
+            Type::WithId(id) => (self.get_type_by_id(id).unwrap().clone(), Some(id)),
+        };
+
+        if let Some(id) = id {
+            if encountered_types.contains(id) {
+                return format!("[cyclical type #{}]", id.value);
+            }
+
+            encountered_types.insert(*id);
+        }
+
+        match type_info {
+            TypeInfo::Pointer(target) => {
+                format!("{}*", self.format_type_inner(&target, encountered_types))
+            }
+
+            TypeInfo::BuiltIn(builtin) => format!("{builtin}"),
+
+            TypeInfo::Struct(Struct {
+                members: Some(members),
+            }) => format!(
+                "struct {{\n\t{}\n}}",
+                members
+                    .iter()
+                    .map(|member| format!(
+                        "{} {}",
+                        self.resolve_concrete_type(&member.type_info)
+                            .map(|t| self.format_type_inner(&t.into(), encountered_types))
+                            .unwrap_or_else(|| String::from("unresolved type")),
+                        member
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| String::from("(unnamed)"))
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(";\n\t")
+            ),
+
+            TypeInfo::Struct(Struct { members: None }) => "struct".to_string(),
+
+            TypeInfo::Enum(enum_info) => format!("{enum_info:?}"),
+
+            TypeInfo::Function(function) => format!("{function:?}"),
+
+            TypeInfo::Const(inner) => format!("{:?}", self.resolve_concrete_type(&inner).unwrap()),
+        }
     }
 }
 
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "functions: {:?}", self.functions)?;
+
         writeln!(f, "global vars: {:?}", self.global_variables)?;
+
         writeln!(f, "enums: {:?}", self.enums)?;
+
         writeln!(f, "structs: {:?}", self.structs)?;
-        writeln!(f, "type id mapping: {:?}", self.id_to_concrete_type)?;
-        writeln!(f, "typedefs: {:?}", self.typedefs)?;
+
+        writeln!(
+            f,
+            "\n========= type id mapping =========\n{}",
+            self.id_to_concrete_type
+                .iter()
+                .map(|(id, info)| format!(
+                    "{} = {}",
+                    id.value,
+                    self.format_type(&(info.clone()).into()),
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )?;
+
+        writeln!(
+            f,
+            "\n========= typedefs =========\n{}",
+            self.typedefs
+                .iter()
+                .map(|(name, &id)| format!("typedef {} {name};\n", self.format_type(&id.into())))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )?;
+
         Ok(())
     }
 }

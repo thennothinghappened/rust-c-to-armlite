@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::parser::program::{statement::Statement, TypeId};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +48,35 @@ pub enum BuiltInType {
     Float,
     Double,
     LongDouble,
+}
+
+impl From<BuiltInType> for &'static str {
+    fn from(value: BuiltInType) -> Self {
+        match value {
+            BuiltInType::Void => "void",
+            BuiltInType::Bool => "bool",
+            BuiltInType::Char => "char",
+            BuiltInType::SignedChar => "signed char",
+            BuiltInType::UnsignedChar => "unsigned char",
+            BuiltInType::Short => "short",
+            BuiltInType::UnsignedShort => "unsigned short",
+            BuiltInType::Int => "int",
+            BuiltInType::UnsignedInt => "unsigned int",
+            BuiltInType::Long => "long",
+            BuiltInType::UnsignedLong => "unsigned long",
+            BuiltInType::LongLong => "long long",
+            BuiltInType::UnsignedLongLong => "unsigned long long",
+            BuiltInType::Float => "float",
+            BuiltInType::Double => "double",
+            BuiltInType::LongDouble => "long double",
+        }
+    }
+}
+
+impl Display for BuiltInType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", <&'static str>::from(*self))
+    }
 }
 
 impl From<BuiltInType> for TypeInfo {

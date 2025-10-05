@@ -7,7 +7,13 @@ typedef struct
 	char* buf;
 } String;
 
+typedef struct LinkedList
+{
+	int data;
+	struct LinkedList* next;
+	
+} LinkedList;
 
 int main() {
-	return "hi";
+	String* blah;
 }
