@@ -307,6 +307,8 @@ impl<'a> Parser<'a> {
                 Ok(Expr::IntLiteral(int))
             }
 
+            Token::OpenParen => self.parse_expr_in_brackets(),
+
             _ => Err(self.unexpected_token()),
         }
     }
