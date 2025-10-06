@@ -38,6 +38,7 @@ pub(crate) enum Token<'a> {
     QuestionMark,
     Colon,
     StringLiteral(&'a str),
+    IntLiteral(i32),
     Ident(&'a str),
     Unknown(char),
 }
@@ -91,6 +92,7 @@ impl<'a> Display for Token<'a> {
 
         match self {
             Token::StringLiteral(content) => write!(f, "\"{content}\""),
+            Token::IntLiteral(int) => write!(f, "{int}"),
             Token::Ident(name) => write!(f, "Ident({name})"),
             Token::Unknown(char) => write!(f, "Unknown({char})"),
             _ => panic!("unhandled case {self:?}, somebody forgot to add it"),
@@ -122,12 +124,8 @@ impl<'a> Lexer<'a> {
             return Some(peeked);
         }
 
-        loop {
-            // Discard whitespace.
-            let Some(_) = self.take_chars_while(|char| char.is_ascii_whitespace()) else {
-                break;
-            };
-        }
+        // Discard whitespace.
+        self.take_chars_while(|char| char.is_ascii_whitespace());
 
         let start = self.index;
 
@@ -165,13 +163,17 @@ impl<'a> Lexer<'a> {
                 let content = self.take_chars_while(|char| char != '"');
                 self.consume_char('"');
 
-                break 'get_token Token::StringLiteral(content.unwrap_or(""));
+                break 'get_token Token::StringLiteral(content);
+            }
+
+            if char.is_numeric() {
+                // TODO: support 0x, 0b, etc.
+                let int = self.take_chars_while(char::is_numeric).parse().unwrap();
+                break 'get_token Token::IntLiteral(int);
             }
 
             if char == '_' || char.is_alphabetic() {
-                let str = self
-                    .take_chars_while(|char| char == '_' || char.is_alphanumeric())
-                    .unwrap();
+                let str = self.take_chars_while(|char| char == '_' || char.is_alphanumeric());
 
                 if let Some(token) = match str {
                     "if" => Some(Token::If),
@@ -306,7 +308,7 @@ impl<'a> Lexer<'a> {
         false
     }
 
-    fn take_chars_while<F>(&mut self, predicate: F) -> Option<&'a str>
+    fn take_chars_while<F>(&mut self, predicate: F) -> &'a str
     where
         F: Fn(char) -> bool,
     {
@@ -317,7 +319,7 @@ impl<'a> Lexer<'a> {
             .count();
 
         if num == 0 {
-            return None;
+            return "";
         }
 
         let slice = &self.chars.as_str()[0..num];
@@ -325,7 +327,7 @@ impl<'a> Lexer<'a> {
         self.chars.nth(num - 1);
         self.index += num;
 
-        Some(slice)
+        slice
     }
 
     fn accept_char(&mut self, expected: char) -> bool {

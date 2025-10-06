@@ -7,6 +7,7 @@ pub mod call;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     StringLiteral(String),
+    IntLiteral(i32),
     Reference(String),
     Call(Box<Call>),
     BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
@@ -56,6 +57,7 @@ impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::StringLiteral(content) => write!(f, "\"{content}\""),
+            Expr::IntLiteral(int) => write!(f, "{int}"),
             Expr::Reference(var_name) => write!(f, "{var_name}"),
             Expr::Call(call) => write!(f, "{call}"),
             Expr::BinaryOp(op, lhs, rhs) => write!(f, "{lhs}{op}{rhs}"),

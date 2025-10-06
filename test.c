@@ -7,7 +7,7 @@ typedef struct
 	char* buf;
 } String;
 
-
 int main() {
-	return "hi";
+	String String;
+	return 0;
 }
