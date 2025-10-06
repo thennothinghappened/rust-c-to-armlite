@@ -281,9 +281,12 @@ impl<'a> Parser<'a> {
         let mut lhs = self.parse_unary_expr()?;
 
         while let Some(op) = self.lexer.maybe_map_next(|token| {
-            BinaryOp::try_from(token)
-                .ok()
-                .filter(|op| op.binding_power() >= min_power)
+            match token {
+                Token::Comma => Some(BinaryOp::AndThen),
+                Token::Assign => Some(BinaryOp::Assign),
+                _ => None,
+            }
+            .filter(|op| op.binding_power() >= min_power)
         }) {
             lhs = Expr::BinaryOp(
                 op,

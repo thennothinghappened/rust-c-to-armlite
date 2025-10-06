@@ -1,9 +1,6 @@
 use std::fmt::Display;
 
-use crate::{
-    lexer::token::Token,
-    parser::program::{expr::call::Call, types::Type, TypeId},
-};
+use crate::parser::program::{expr::call::Call, types::Type};
 
 pub mod call;
 
@@ -37,18 +34,6 @@ impl BindingPower for BinaryOp {
         match self {
             BinaryOp::AndThen => 0,
             BinaryOp::Assign => 1,
-        }
-    }
-}
-
-impl<'a> TryFrom<Token<'a>> for BinaryOp {
-    type Error = ();
-
-    fn try_from(value: Token<'a>) -> Result<Self, Self::Error> {
-        match value {
-            Token::Comma => Ok(BinaryOp::AndThen),
-            Token::Assign => Ok(BinaryOp::Assign),
-            _ => Err(()),
         }
     }
 }
