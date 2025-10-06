@@ -164,7 +164,13 @@ impl<'a> Parser<'a> {
         self.lexer.expect(Token::OpenCurly)?;
         self.consume_semicolons();
 
-        while !self.lexer.accept(Token::CloseCurly) {
+        loop {
+            self.consume_semicolons();
+
+            if self.lexer.accept(Token::CloseCurly) {
+                break;
+            }
+
             statements.push(self.parse_statement()?);
         }
 
@@ -172,13 +178,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError<'a>> {
-        self.consume_semicolons();
-
         match self.peek_token()?.0 {
             Token::Semicolon => {
                 self.lexer.next();
                 self.parse_statement()
             }
+
+            Token::OpenCurly => self.parse_block(),
 
             Token::If => {
                 self.lexer.next();

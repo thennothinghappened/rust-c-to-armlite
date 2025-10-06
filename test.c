@@ -9,5 +9,12 @@ typedef struct
 
 int main() {
 	String String;
-	return 0;
+	char* stuff = "hi";
+	uint64_t num = 3;
+
+	if num {
+		int a = 3;
+	}
+
+	return num;
 }
