@@ -15,7 +15,7 @@ pub mod expr;
 pub mod statement;
 pub mod types;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Program {
     functions: HashMap<String, Function>,
     global_variables: HashMap<String, (Type, Option<Expr>)>,

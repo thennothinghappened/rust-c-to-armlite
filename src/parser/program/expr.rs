@@ -21,6 +21,9 @@ pub trait BindingPower {
 pub enum BinaryOp {
     /// Comma operator: evaluate LHS, discard, evaluate RHS, return.
     AndThen,
+
+    /// Assign whatever LHS resolves to, to the evaluated value of RHS, and return that value.
+    Assign,
 }
 
 impl BindingPower for BinaryOp {
@@ -28,6 +31,7 @@ impl BindingPower for BinaryOp {
         // Inverse of https://en.cppreference.com/w/c/language/operator_precedence.html
         match self {
             BinaryOp::AndThen => 0,
+            BinaryOp::Assign => 1,
         }
     }
 }
@@ -38,6 +42,7 @@ impl<'a> TryFrom<Token<'a>> for BinaryOp {
     fn try_from(value: Token<'a>) -> Result<Self, Self::Error> {
         match value {
             Token::Comma => Ok(BinaryOp::AndThen),
+            Token::Assign => Ok(BinaryOp::Assign),
             _ => Err(()),
         }
     }
@@ -47,6 +52,7 @@ impl Display for BinaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
             BinaryOp::AndThen => ", ",
+            BinaryOp::Assign => " = ",
         };
 
         write!(f, "{str}")

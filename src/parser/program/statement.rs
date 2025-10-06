@@ -3,13 +3,8 @@ use crate::parser::program::{expr::Expr, types::Type};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Block(Vec<Statement>),
-
     Declare(Variable),
-
-    Assign {
-        var_name: String,
-        value: Box<Expr>,
-    },
+    Expr(Expr),
 
     If {
         condition: Box<Expr>,

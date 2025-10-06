@@ -14,6 +14,7 @@ pub mod program;
 
 pub enum TodoType {}
 
+#[derive(Clone)]
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     program: program::Program,
@@ -230,12 +231,22 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Return(Box::new(value)))
             }
 
-            _ => self.parse_variable_decl(),
-        }
-    }
+            _ => {
+                // Whatever is left could either be a variable declaration, or could be a lone
+                // expression. We'll cheat by spawning two clones of this parser and parsing both
+                // possible interpretations, then picking the one that works.
 
-    fn consume_semicolons(&mut self) {
-        while self.lexer.accept(Token::Semicolon) {}
+                if self.clone().parse_variable_decl().is_ok() {
+                    return self.parse_variable_decl();
+                }
+
+                if self.clone().parse_expr(0).is_ok() {
+                    return Ok(Statement::Expr(self.parse_expr(0)?));
+                }
+
+                Err(self.unexpected_token())
+            }
+        }
     }
 
     fn parse_variable_decl(&mut self) -> Result<Statement, ParseError<'a>> {
@@ -480,6 +491,10 @@ impl<'a> Parser<'a> {
 
     fn peek_token(&mut self) -> Result<TokenInfo<'a>, ParseError<'a>> {
         self.lexer.peek().ok_or_else(|| self.unexpected_eof())
+    }
+
+    fn consume_semicolons(&mut self) {
+        while self.lexer.accept(Token::Semicolon) {}
     }
 
     fn unexpected_eof(&self) -> ParseError<'a> {

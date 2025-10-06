@@ -12,9 +12,11 @@ int main() {
 	char* stuff = "hi";
 	uint64_t num = 3;
 
-	if ((num)) {
-		int a = 3;
+	if (num) {
+		num = 4;
 	}
+
+	num, num;
 
 	return num;
 }
