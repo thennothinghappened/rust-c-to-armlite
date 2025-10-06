@@ -23,8 +23,8 @@ fn main() {
     let codespan_config = codespan_reporting::term::Config::default();
 
     if let Some(path) = args().nth(1) {
-        let buf = read_to_string(path).expect("Must pass a valid path to read from");
-        return parse_program(&buf, &codespan_writer, &codespan_config);
+        let buf = read_to_string(&path).expect("Must pass a valid path to read from");
+        return parse_program(&buf, &path, &codespan_writer, &codespan_config);
     }
 
     let stdin = stdin();
@@ -39,13 +39,14 @@ fn main() {
                 break;
             }
 
-            parse_program(&buf, &codespan_writer, &codespan_config);
+            parse_program(&buf, "stdin", &codespan_writer, &codespan_config);
         }
     }
 }
 
 fn parse_program(
     buf: &str,
+    file_name: &str,
     codespan_writer: &term::termcolor::StandardStream,
     codespan_config: &term::Config,
 ) {
@@ -56,7 +57,7 @@ fn parse_program(
         Ok(program) => program,
         Err(err) => {
             let mut files = SimpleFiles::new();
-            let file = files.add("main.c", &buf);
+            let file = files.add(file_name, &buf);
 
             let diagnostic = Diagnostic::error()
                 .with_label(Label::primary(file, err.location).with_message(err.kind));
