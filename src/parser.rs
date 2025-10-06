@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::{
-    lexer::{Lexer, LexerError, LexerErrorKind, Token, TokenInfo},
+    lexer::{token::Token, Lexer, LexerError, LexerErrorKind, TokenInfo},
     parser::program::{
         expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
         statement::{Statement, Variable},

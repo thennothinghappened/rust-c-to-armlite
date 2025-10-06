@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    lexer::Token,
+    lexer::token::Token,
     parser::program::{expr::call::Call, types::Type, TypeId},
 };
 
