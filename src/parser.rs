@@ -277,10 +277,22 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_terminal_expr(&mut self) -> Result<Expr, ParseError<'a>> {
-        match self.next_token()?.0 {
-            Token::Ident(name) => Ok(Expr::Reference(name.to_string())),
-            Token::StringLiteral(content) => Ok(Expr::StringLiteral(content.to_string())),
-            Token::IntLiteral(int) => Ok(Expr::IntLiteral(int)),
+        match self.peek_token()?.0 {
+            Token::Ident(name) => {
+                self.lexer.next();
+                Ok(Expr::Reference(name.to_string()))
+            }
+
+            Token::StringLiteral(content) => {
+                self.lexer.next();
+                Ok(Expr::StringLiteral(content.to_string()))
+            }
+
+            Token::IntLiteral(int) => {
+                self.lexer.next();
+                Ok(Expr::IntLiteral(int))
+            }
+
             _ => Err(self.unexpected_token()),
         }
     }
