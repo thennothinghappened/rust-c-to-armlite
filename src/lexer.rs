@@ -15,6 +15,10 @@ pub(crate) enum Token<'a> {
     Comma,
     Star,
     Assign,
+    Plus,
+    PlusPlus,
+    Minus,
+    MinusMinus,
     BooleanEqual,
     If,
     Else,
@@ -35,6 +39,7 @@ pub(crate) enum Token<'a> {
     Float,
     Double,
     Void,
+    SizeOf,
     QuestionMark,
     Colon,
     StringLiteral(&'a str),
@@ -57,6 +62,10 @@ impl<'a> TryFrom<Token<'a>> for &'static str {
             Token::Star => "*",
             Token::Comma => ",",
             Token::Assign => "=",
+            Token::Plus => "+",
+            Token::PlusPlus => "++",
+            Token::Minus => "-",
+            Token::MinusMinus => "--",
             Token::BooleanEqual => "==",
             Token::If => "if",
             Token::Else => "else",
@@ -76,6 +85,7 @@ impl<'a> TryFrom<Token<'a>> for &'static str {
             Token::Float => "float",
             Token::Double => "double",
             Token::Void => "void",
+            Token::SizeOf => "sizeof",
             Token::Const => "const",
             Token::QuestionMark => "?",
             Token::Colon => ":",
@@ -84,7 +94,7 @@ impl<'a> TryFrom<Token<'a>> for &'static str {
     }
 }
 
-impl<'a> Display for Token<'a> {
+impl Display for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Ok(str) = <&'static str>::try_from(*self) {
             return write!(f, "{str}");
@@ -143,6 +153,27 @@ impl<'a> Lexer<'a> {
                 ',' => Some(Token::Comma),
                 '?' => Some(Token::QuestionMark),
                 ':' => Some(Token::Colon),
+
+                '+' => {
+                    self.next_char();
+
+                    if self.accept_char('+') {
+                        break 'get_token Token::PlusPlus;
+                    }
+
+                    break 'get_token Token::Plus;
+                }
+
+                '-' => {
+                    self.next_char();
+
+                    if self.accept_char('-') {
+                        break 'get_token Token::MinusMinus;
+                    }
+
+                    break 'get_token Token::Minus;
+                }
+
                 _ => None,
             };
 
@@ -194,6 +225,7 @@ impl<'a> Lexer<'a> {
                     "float" => Some(Token::Float),
                     "double" => Some(Token::Double),
                     "void" => Some(Token::Void),
+                    "sizeof" => Some(Token::SizeOf),
                     "const" => Some(Token::Const),
                     _ => None,
                 } {

@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use crate::{lexer::Token, parser::program::expr::call::Call};
+use crate::{
+    lexer::Token,
+    parser::program::{expr::call::Call, types::Type, TypeId},
+};
 
 pub mod call;
 
@@ -9,8 +12,10 @@ pub enum Expr {
     StringLiteral(String),
     IntLiteral(i32),
     Reference(String),
-    Call(Box<Call>),
+    Call(Call),
     BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
+    UnaryOp(UnaryOp, Box<Expr>),
+    Cast(Box<Expr>, Type),
 }
 
 pub trait BindingPower {
@@ -59,14 +64,62 @@ impl Display for BinaryOp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnaryOp {
+    /// ++<expr>
+    IncrementThenGet,
+
+    /// <expr>++
+    GetThenIncrement,
+
+    /// --<expr>
+    DecrementThenGet,
+
+    /// <expr>--
+    GetThenDecrement,
+
+    /// Get the byte-length of the given operand.
+    SizeOf,
+
+    /// Get the boolean-opposite of the given operand's truthiness.
+    BooleanNot,
+
+    /// Invert the sign of the operand.
+    Negative,
+
+    /// Get the memory address of the operand.
+    AddressOf,
+
+    /// Get the data at the given address.
+    Dereference,
+}
+
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::StringLiteral(content) => write!(f, "\"{content}\""),
+
             Expr::IntLiteral(int) => write!(f, "{int}"),
+
             Expr::Reference(var_name) => write!(f, "{var_name}"),
+
             Expr::Call(call) => write!(f, "{call}"),
+
             Expr::BinaryOp(op, lhs, rhs) => write!(f, "{lhs}{op}{rhs}"),
+
+            Expr::Cast(expr, type_id) => write!(f, "({type_id:?}){expr}"),
+
+            Expr::UnaryOp(op, expr) => match op {
+                UnaryOp::IncrementThenGet => write!(f, "++{expr}"),
+                UnaryOp::GetThenIncrement => write!(f, "{expr}++"),
+                UnaryOp::DecrementThenGet => write!(f, "--{expr}"),
+                UnaryOp::GetThenDecrement => write!(f, "{expr}--"),
+                UnaryOp::SizeOf => write!(f, "sizeof {expr}"),
+                UnaryOp::BooleanNot => write!(f, "!{expr}"),
+                UnaryOp::Negative => write!(f, "-{expr}"),
+                UnaryOp::AddressOf => write!(f, "&{expr}"),
+                UnaryOp::Dereference => write!(f, "*{expr}"),
+            },
         }
     }
 }

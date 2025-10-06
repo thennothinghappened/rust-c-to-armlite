@@ -1,11 +1,11 @@
-use std::{fmt::Display, rc::Rc};
+use std::fmt::Display;
 
 use crate::parser::program::expr::Expr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Call {
-    target: Rc<Expr>,
-    args: Vec<Expr>,
+    pub target: Box<Expr>,
+    pub args: Vec<Expr>,
 }
 
 impl Display for Call {

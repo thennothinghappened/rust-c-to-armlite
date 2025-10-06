@@ -17,6 +17,7 @@ int main() {
 	}
 
 	num, num;
+	int* things = (void*)main(2);
 
 	return num;
 }

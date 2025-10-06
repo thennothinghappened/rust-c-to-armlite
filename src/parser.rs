@@ -3,7 +3,7 @@ use thiserror::Error;
 use crate::{
     lexer::{Lexer, LexerError, LexerErrorKind, Token, TokenInfo},
     parser::program::{
-        expr::{BinaryOp, BindingPower, Expr},
+        expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
         statement::{Statement, Variable},
         types::{BuiltInType, Function, Member, Struct, Type, TypeDef, TypeInfo},
         DefineTypeError, Program, StructBuilder,
@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
 
         // Global variable decl (optionally with initial value!)
         let value = if self.lexer.accept(Token::Assign) {
-            Some(self.parse_expr(0)?)
+            Some(self.parse_expr(1)?)
         } else {
             None
         };
@@ -180,11 +180,6 @@ impl<'a> Parser<'a> {
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError<'a>> {
         match self.peek_token()?.0 {
-            Token::Semicolon => {
-                self.lexer.next();
-                self.parse_statement()
-            }
-
             Token::OpenCurly => self.parse_block(),
 
             Token::If => {
@@ -237,11 +232,17 @@ impl<'a> Parser<'a> {
                 // possible interpretations, then picking the one that works.
 
                 if self.clone().parse_variable_decl().is_ok() {
-                    return self.parse_variable_decl();
+                    let decl = self.parse_variable_decl().unwrap();
+                    self.lexer.expect(Token::Semicolon)?;
+
+                    return Ok(decl);
                 }
 
                 if self.clone().parse_expr(0).is_ok() {
-                    return Ok(Statement::Expr(self.parse_expr(0)?));
+                    let expr = self.parse_expr(0).unwrap();
+                    self.lexer.expect(Token::Semicolon)?;
+
+                    return Ok(Statement::Expr(expr));
                 }
 
                 Err(self.unexpected_token())
@@ -256,12 +257,10 @@ impl<'a> Parser<'a> {
         let (var_name, var_type) = self.parse_variable_name(initial_type)?;
 
         let value = if self.lexer.accept(Token::Assign) {
-            Some(self.parse_expr(0)?)
+            Some(self.parse_expr(1)?)
         } else {
             None
         };
-
-        self.lexer.expect(Token::Semicolon)?;
 
         Ok(Statement::Declare(Variable {
             name: var_name,
@@ -279,7 +278,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self, min_power: i32) -> Result<Expr, ParseError<'a>> {
-        let mut lhs = self.parse_unary_expr(0)?;
+        let mut lhs = self.parse_unary_expr()?;
 
         while let Some(op) = self.lexer.maybe_map_next(|token| {
             BinaryOp::try_from(token)
@@ -296,9 +295,72 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn parse_unary_expr(&mut self, min_power: i32) -> Result<Expr, ParseError<'a>> {
-        // todo: actually parse unary ops rather than expecting terminal
-        self.parse_terminal_expr()
+    fn parse_unary_expr(&mut self) -> Result<Expr, ParseError<'a>> {
+        if self.lexer.next_is(Token::OpenParen) {
+            // rust stop asking me to collapse this pretty pls
+            if self.clone().parse_cast_expr().is_ok() {
+                return self.parse_cast_expr();
+            }
+        }
+
+        let Some(op) = self.lexer.maybe_map_next(|token| match token {
+            Token::PlusPlus => Some(UnaryOp::GetThenIncrement),
+            Token::MinusMinus => Some(UnaryOp::GetThenDecrement),
+            Token::SizeOf => Some(UnaryOp::SizeOf),
+            _ => None,
+        }) else {
+            return self.parse_postfix_expr();
+        };
+
+        let operand = self.parse_unary_expr()?;
+        Ok(Expr::UnaryOp(op, Box::new(operand)))
+    }
+
+    fn parse_postfix_expr(&mut self) -> Result<Expr, ParseError<'a>> {
+        let mut operand = self.parse_terminal_expr()?;
+
+        while self.lexer.accept(Token::OpenParen) {
+            // Function call args!
+            let mut args: Vec<Expr> = Vec::new();
+
+            while !self.lexer.accept(Token::CloseParen) {
+                // Args are not allowed to use the comma operator, since that'd conflict with
+                // comma being the function arg separator.
+                args.push(self.parse_expr(BinaryOp::AndThen.binding_power() + 1)?);
+
+                if !self.lexer.accept(Token::Comma) {
+                    self.lexer.expect(Token::CloseParen)?;
+                    break;
+                }
+            }
+
+            operand = Expr::Call(Call {
+                target: Box::new(operand),
+                args,
+            });
+        }
+
+        // FIXME: i think currently you can't go like, func()++() tho that seems like nonsense
+        // anyway lol
+        while let Some(op) = self.lexer.maybe_map_next(|token| match token {
+            Token::PlusPlus => Some(UnaryOp::GetThenIncrement),
+            Token::MinusMinus => Some(UnaryOp::GetThenDecrement),
+            _ => None,
+        }) {
+            operand = Expr::UnaryOp(op, Box::new(operand));
+        }
+
+        Ok(operand)
+    }
+
+    fn parse_cast_expr(&mut self) -> Result<Expr, ParseError<'a>> {
+        self.lexer.expect(Token::OpenParen)?;
+        let initial_type = self.parse_type()?;
+        let target_type = self.parse_type_pointersssss(initial_type)?;
+        self.lexer.expect(Token::CloseParen)?;
+
+        let expr = self.parse_expr(0)?;
+        Ok(Expr::Cast(Box::new(expr), target_type))
     }
 
     fn parse_terminal_expr(&mut self) -> Result<Expr, ParseError<'a>> {
