@@ -12,7 +12,7 @@ int main() {
 	char* stuff = "hi";
 	uint64_t num = 3;
 
-	if num {
+	if (num) {
 		int a = 3;
 	}
 

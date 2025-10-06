@@ -189,7 +189,7 @@ impl<'a> Parser<'a> {
             Token::If => {
                 self.lexer.next();
 
-                let condition = self.parse_expr(0)?;
+                let condition = self.parse_expr_in_brackets()?;
                 let if_true = self.parse_statement()?;
 
                 if !self.lexer.accept(Token::Else) {
@@ -212,7 +212,7 @@ impl<'a> Parser<'a> {
             Token::While => {
                 self.lexer.next();
 
-                let condition = self.parse_expr(0)?;
+                let condition = self.parse_expr_in_brackets()?;
                 let block = self.parse_statement()?;
 
                 Ok(Statement::While {
@@ -257,6 +257,14 @@ impl<'a> Parser<'a> {
             var_type,
             value,
         }))
+    }
+
+    fn parse_expr_in_brackets(&mut self) -> Result<Expr, ParseError<'a>> {
+        self.lexer.expect(Token::OpenParen)?;
+        let expr = self.parse_expr(0)?;
+        self.lexer.expect(Token::CloseParen)?;
+
+        Ok(expr)
     }
 
     fn parse_expr(&mut self, min_power: i32) -> Result<Expr, ParseError<'a>> {
