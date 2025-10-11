@@ -2,17 +2,27 @@ use std::{fmt::Display, str::Chars};
 
 use thiserror::Error;
 
-use crate::{lexer::token::Token, span::Span};
+use crate::{lexer::tokenkind::TokenKind, span::Span};
 
-pub mod token;
+pub mod tokenkind;
 
-pub(crate) type TokenInfo<'a> = (Token<'a>, Span);
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct Token<'a> {
+    pub kind: TokenKind<'a>,
+    pub span: Span,
+}
+
+impl<'a> Token<'a> {
+    pub fn new(token: TokenKind<'a>, span: Span) -> Self {
+        Self { kind: token, span }
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct Lexer<'a> {
     pub index: usize,
     chars: Chars<'a>,
-    maybe_peeked: Option<TokenInfo<'a>>,
+    maybe_peeked: Option<Token<'a>>,
 }
 
 impl<'a> Lexer<'a> {
@@ -24,10 +34,10 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next(&mut self) -> Option<TokenInfo<'a>> {
+    pub fn next(&mut self) -> Token<'a> {
         if let Some(peeked) = self.maybe_peeked {
             self.maybe_peeked = None;
-            return Some(peeked);
+            return peeked;
         }
 
         // Discard whitespace.
@@ -35,39 +45,41 @@ impl<'a> Lexer<'a> {
 
         let start = self.index;
 
-        let token: Token<'a> = 'get_token: {
-            let char = self.peek_char()?;
+        let token: TokenKind<'a> = 'get_token: {
+            let Some(char) = self.peek_char() else {
+                break 'get_token TokenKind::Eof;
+            };
 
             let basic_token = match char {
-                '{' => Some(Token::OpenCurly),
-                '}' => Some(Token::CloseCurly),
-                '(' => Some(Token::OpenParen),
-                ')' => Some(Token::CloseParen),
-                ';' => Some(Token::Semicolon),
-                '&' => Some(Token::Ampersand),
-                '*' => Some(Token::Star),
-                ',' => Some(Token::Comma),
-                '?' => Some(Token::QuestionMark),
-                ':' => Some(Token::Colon),
+                '{' => Some(TokenKind::OpenCurly),
+                '}' => Some(TokenKind::CloseCurly),
+                '(' => Some(TokenKind::OpenParen),
+                ')' => Some(TokenKind::CloseParen),
+                ';' => Some(TokenKind::Semicolon),
+                '&' => Some(TokenKind::Ampersand),
+                '*' => Some(TokenKind::Star),
+                ',' => Some(TokenKind::Comma),
+                '?' => Some(TokenKind::QuestionMark),
+                ':' => Some(TokenKind::Colon),
 
                 '+' => {
                     self.next_char();
 
                     if self.accept_char('+') {
-                        break 'get_token Token::PlusPlus;
+                        break 'get_token TokenKind::PlusPlus;
                     }
 
-                    break 'get_token Token::Plus;
+                    break 'get_token TokenKind::Plus;
                 }
 
                 '-' => {
                     self.next_char();
 
                     if self.accept_char('-') {
-                        break 'get_token Token::MinusMinus;
+                        break 'get_token TokenKind::MinusMinus;
                     }
 
-                    break 'get_token Token::Minus;
+                    break 'get_token TokenKind::Minus;
                 }
 
                 _ => None,
@@ -80,9 +92,9 @@ impl<'a> Lexer<'a> {
 
             if self.accept_char('=') {
                 break 'get_token if self.accept_char('=') {
-                    Token::BooleanEqual
+                    TokenKind::BooleanEqual
                 } else {
-                    Token::Assign
+                    TokenKind::Assign
                 };
             }
 
@@ -90,72 +102,73 @@ impl<'a> Lexer<'a> {
                 let content = self.take_chars_while(|char| char != '"');
                 self.consume_char('"');
 
-                break 'get_token Token::StringLiteral(content);
+                break 'get_token TokenKind::StringLiteral(content);
             }
 
             if char.is_numeric() {
                 // TODO: support 0x, 0b, etc.
                 let int = self.take_chars_while(char::is_numeric).parse().unwrap();
-                break 'get_token Token::IntLiteral(int);
+                break 'get_token TokenKind::IntLiteral(int);
             }
 
             if char == '_' || char.is_alphabetic() {
                 let str = self.take_chars_while(|char| char == '_' || char.is_alphanumeric());
 
                 if let Some(token) = match str {
-                    "if" => Some(Token::If),
-                    "else" => Some(Token::Else),
-                    "while" => Some(Token::While),
-                    "return" => Some(Token::Return),
-                    "struct" => Some(Token::Struct),
-                    "typedef" => Some(Token::TypeDef),
-                    "union" => Some(Token::Union),
-                    "enum" => Some(Token::Enum),
-                    "unsigned" => Some(Token::Unsigned),
-                    "signed" => Some(Token::Signed),
-                    "bool" => Some(Token::Bool),
-                    "int" => Some(Token::Int),
-                    "long" => Some(Token::Long),
-                    "short" => Some(Token::Short),
-                    "char" => Some(Token::Char),
-                    "float" => Some(Token::Float),
-                    "double" => Some(Token::Double),
-                    "void" => Some(Token::Void),
-                    "sizeof" => Some(Token::SizeOf),
-                    "const" => Some(Token::Const),
+                    "if" => Some(TokenKind::If),
+                    "else" => Some(TokenKind::Else),
+                    "while" => Some(TokenKind::While),
+                    "return" => Some(TokenKind::Return),
+                    "struct" => Some(TokenKind::Struct),
+                    "typedef" => Some(TokenKind::TypeDef),
+                    "union" => Some(TokenKind::Union),
+                    "enum" => Some(TokenKind::Enum),
+                    "unsigned" => Some(TokenKind::Unsigned),
+                    "signed" => Some(TokenKind::Signed),
+                    "bool" => Some(TokenKind::Bool),
+                    "int" => Some(TokenKind::Int),
+                    "long" => Some(TokenKind::Long),
+                    "short" => Some(TokenKind::Short),
+                    "char" => Some(TokenKind::Char),
+                    "float" => Some(TokenKind::Float),
+                    "double" => Some(TokenKind::Double),
+                    "void" => Some(TokenKind::Void),
+                    "sizeof" => Some(TokenKind::SizeOf),
+                    "const" => Some(TokenKind::Const),
                     _ => None,
                 } {
                     break 'get_token token;
                 }
 
-                break 'get_token Token::Ident(str);
+                break 'get_token TokenKind::Ident(str);
             }
 
-            Token::Unknown(self.next_char()?)
+            self.next_char();
+            TokenKind::Unknown(char)
         };
 
-        Some((token, Span::new(start, self.index)))
+        Token::new(token, Span::new(start, self.index))
     }
 
-    pub fn peek(&mut self) -> Option<TokenInfo<'a>> {
+    pub fn peek(&mut self) -> Token<'a> {
         if let Some(peeked) = self.maybe_peeked {
-            return Some(peeked);
+            return peeked;
         }
 
-        let peeked = self.next()?;
-
+        let peeked = self.next();
         self.maybe_peeked = Some(peeked);
-        Some(peeked)
+
+        peeked
     }
 
-    pub fn next_if<F>(&mut self, predicate: F) -> Option<TokenInfo<'a>>
+    pub fn next_if<F>(&mut self, predicate: F) -> Option<Token<'a>>
     where
-        F: FnOnce(Token<'a>) -> bool,
+        F: FnOnce(TokenKind<'a>) -> bool,
     {
-        let (token, _) = self.peek()?;
+        let token = self.peek();
 
-        if predicate(token) {
-            return self.next();
+        if predicate(token.kind) {
+            return Some(self.next());
         }
 
         None
@@ -163,64 +176,68 @@ impl<'a> Lexer<'a> {
 
     pub fn maybe_map_next<F, R>(&mut self, map: F) -> Option<R>
     where
-        F: FnOnce(Token<'a>) -> Option<R>,
+        F: FnOnce(TokenKind<'a>) -> Option<R>,
     {
-        let out = self.peek().and_then(|(token, _)| map(token))?;
-        self.next();
+        let out = map(self.peek().kind);
 
-        Some(out)
+        if out.is_some() {
+            self.next();
+        }
+
+        out
     }
 
-    pub fn accept(&mut self, expected: Token<'a>) -> bool {
+    pub fn accept(&mut self, expected: TokenKind<'a>) -> bool {
         self.next_if(|token| token == expected).is_some()
     }
 
-    pub fn next_is(&mut self, expected: Token<'a>) -> bool {
-        self.peek()
-            .map(|(token, _)| token == expected)
-            .unwrap_or(false)
+    pub fn next_is(&mut self, expected: TokenKind<'a>) -> bool {
+        self.peek().kind == expected
     }
 
     pub fn accept_ident(&mut self) -> Option<&'a str> {
         self.maybe_map_next(|token| match token {
-            Token::Ident(name) => Some(name),
+            TokenKind::Ident(name) => Some(name),
             _ => None,
         })
     }
 
-    pub fn consume(&mut self) -> Result<TokenInfo<'a>, LexerError<'a>> {
-        self.next()
-            .ok_or_else(|| self.err_here(LexerErrorKind::EarlyEof))
+    pub fn consume(&mut self) -> Result<Token<'a>, LexerError<'a>> {
+        let token = self.next();
+
+        if token.kind == TokenKind::Eof {
+            return Err(self.err_here(LexerErrorKind::EarlyEof));
+        }
+
+        Ok(token)
     }
 
-    pub fn expect(&mut self, expected: Token<'static>) -> Result<Span, LexerError<'a>> {
-        let (token, location) = self.consume()?;
+    pub fn expect(&mut self, expected: TokenKind<'static>) -> Result<Span, LexerError<'a>> {
+        let token = self.consume()?;
 
-        if token == expected {
-            return Ok(location);
+        if token.kind == expected {
+            return Ok(token.span);
         }
 
         Err(LexerError {
-            location,
+            span: token.span,
             kind: LexerErrorKind::WrongToken {
                 expected,
-                actual: token,
+                actual: token.kind,
             },
         })
     }
 
     pub fn consume_ident(&mut self) -> Result<&'a str, LexerError<'a>> {
-        let (token, location) = self
-            .next()
-            .ok_or_else(|| self.err_here(LexerErrorKind::EarlyEof))?;
+        let tkinfo = self.consume()?;
 
-        if let Token::Ident(name) = token {
+        if let TokenKind::Ident(name) = tkinfo.kind {
             return Ok(name);
         }
 
         Err(LexerError::wrong_token(
-            Token::Ident("identifier"),
-            (token, location),
+            TokenKind::Ident("identifier"),
+            tkinfo,
         ))
     }
 
@@ -279,9 +296,9 @@ impl<'a> Lexer<'a> {
 
     fn err_here(&self, err: LexerErrorKind<'a>) -> LexerError<'a> {
         LexerError {
-            location: self
+            span: self
                 .maybe_peeked
-                .map(|(_, location)| location)
+                .map(|tk| tk.span)
                 .unwrap_or(Span::at(self.index)),
             kind: err,
         }
@@ -289,9 +306,9 @@ impl<'a> Lexer<'a> {
 }
 
 #[derive(Debug, Error)]
-#[error("{kind} at {location}")]
+#[error("{kind} at {span}")]
 pub struct LexerError<'a> {
-    pub location: Span,
+    pub span: Span,
     pub kind: LexerErrorKind<'a>,
 }
 
@@ -299,8 +316,8 @@ pub struct LexerError<'a> {
 pub enum LexerErrorKind<'a> {
     #[error("Incorrect token {actual}, expected {expected}")]
     WrongToken {
-        expected: Token<'static>,
-        actual: Token<'a>,
+        expected: TokenKind<'static>,
+        actual: TokenKind<'a>,
     },
 
     #[error("Unexpected End Of File")]
@@ -308,10 +325,13 @@ pub enum LexerErrorKind<'a> {
 }
 
 impl<'a> LexerError<'a> {
-    pub(super) fn wrong_token(expected: Token<'static>, (actual, location): TokenInfo<'a>) -> Self {
+    pub(super) fn wrong_token(expected: TokenKind<'static>, actual: Token<'a>) -> Self {
         Self {
-            location,
-            kind: LexerErrorKind::WrongToken { expected, actual },
+            span: actual.span,
+            kind: LexerErrorKind::WrongToken {
+                expected,
+                actual: actual.kind,
+            },
         }
     }
 }

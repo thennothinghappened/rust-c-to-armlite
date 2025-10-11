@@ -60,7 +60,7 @@ fn parse_program(
             let file = files.add(file_name, &buf);
 
             let diagnostic = Diagnostic::error()
-                .with_label(Label::primary(file, err.location).with_message(err.kind));
+                .with_label(Label::primary(file, err.span).with_message(err.kind));
 
             term::emit(
                 &mut codespan_writer.lock(),
