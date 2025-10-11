@@ -86,7 +86,13 @@ impl<'a> TryFrom<TokenKind<'a>> for &'static str {
             TokenKind::Const => "const",
             TokenKind::QuestionMark => "?",
             TokenKind::Colon => ":",
-            _ => return Err(()),
+
+            TokenKind::StringLiteral(_)
+            | TokenKind::IntLiteral(_)
+            | TokenKind::Ident(_)
+            | TokenKind::Unknown(_) => return Err(()),
+
+            TokenKind::Eof => "<<End Of File>>",
         })
     }
 }
