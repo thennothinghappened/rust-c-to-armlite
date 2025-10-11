@@ -44,109 +44,7 @@ impl<'a> Lexer<'a> {
         self.take_chars_while(|char| char.is_ascii_whitespace());
 
         let start = self.index;
-
-        let token: TokenKind<'a> = 'get_token: {
-            let Some(char) = self.peek_char() else {
-                break 'get_token TokenKind::Eof;
-            };
-
-            let basic_token = match char {
-                '{' => Some(TokenKind::OpenCurly),
-                '}' => Some(TokenKind::CloseCurly),
-                '(' => Some(TokenKind::OpenParen),
-                ')' => Some(TokenKind::CloseParen),
-                ';' => Some(TokenKind::Semicolon),
-                '&' => Some(TokenKind::Ampersand),
-                '*' => Some(TokenKind::Star),
-                ',' => Some(TokenKind::Comma),
-                '?' => Some(TokenKind::QuestionMark),
-                ':' => Some(TokenKind::Colon),
-
-                '+' => {
-                    self.next_char();
-
-                    if self.accept_char('+') {
-                        break 'get_token TokenKind::PlusPlus;
-                    }
-
-                    break 'get_token TokenKind::Plus;
-                }
-
-                '-' => {
-                    self.next_char();
-
-                    if self.accept_char('-') {
-                        break 'get_token TokenKind::MinusMinus;
-                    }
-
-                    break 'get_token TokenKind::Minus;
-                }
-
-                _ => None,
-            };
-
-            if let Some(basic_token) = basic_token {
-                self.next_char();
-                break 'get_token basic_token;
-            }
-
-            if self.accept_char('=') {
-                break 'get_token if self.accept_char('=') {
-                    TokenKind::BooleanEqual
-                } else {
-                    TokenKind::Assign
-                };
-            }
-
-            if self.accept_char('"') {
-                let content = self.take_chars_while(|char| char != '"');
-                self.consume_char('"');
-
-                break 'get_token TokenKind::StringLiteral(content);
-            }
-
-            if char.is_numeric() {
-                // TODO: support 0x, 0b, etc.
-                let int = self.take_chars_while(char::is_numeric).parse().unwrap();
-                break 'get_token TokenKind::IntLiteral(int);
-            }
-
-            if char == '_' || char.is_alphabetic() {
-                let str = self.take_chars_while(|char| char == '_' || char.is_alphanumeric());
-
-                if let Some(token) = match str {
-                    "if" => Some(TokenKind::If),
-                    "else" => Some(TokenKind::Else),
-                    "while" => Some(TokenKind::While),
-                    "return" => Some(TokenKind::Return),
-                    "struct" => Some(TokenKind::Struct),
-                    "typedef" => Some(TokenKind::TypeDef),
-                    "union" => Some(TokenKind::Union),
-                    "enum" => Some(TokenKind::Enum),
-                    "unsigned" => Some(TokenKind::Unsigned),
-                    "signed" => Some(TokenKind::Signed),
-                    "bool" => Some(TokenKind::Bool),
-                    "int" => Some(TokenKind::Int),
-                    "long" => Some(TokenKind::Long),
-                    "short" => Some(TokenKind::Short),
-                    "char" => Some(TokenKind::Char),
-                    "float" => Some(TokenKind::Float),
-                    "double" => Some(TokenKind::Double),
-                    "void" => Some(TokenKind::Void),
-                    "sizeof" => Some(TokenKind::SizeOf),
-                    "const" => Some(TokenKind::Const),
-                    _ => None,
-                } {
-                    break 'get_token token;
-                }
-
-                break 'get_token TokenKind::Ident(str);
-            }
-
-            self.next_char();
-            TokenKind::Unknown(char)
-        };
-
+        let token = self.lex_next();
         Token::new(token, Span::new(start, self.index))
     }
 
@@ -241,6 +139,100 @@ impl<'a> Lexer<'a> {
         ))
     }
 
+    fn lex_next(&mut self) -> TokenKind<'a> {
+        let Some(char) = self.peek_char() else {
+            return TokenKind::Eof;
+        };
+
+        if let Some(basic_token) = self.maybe_map_next_char(|char| match char {
+            '{' => Some(TokenKind::OpenCurly),
+            '}' => Some(TokenKind::CloseCurly),
+            '(' => Some(TokenKind::OpenParen),
+            ')' => Some(TokenKind::CloseParen),
+            ';' => Some(TokenKind::Semicolon),
+            '&' => Some(TokenKind::Ampersand),
+            '*' => Some(TokenKind::Star),
+            ',' => Some(TokenKind::Comma),
+            '?' => Some(TokenKind::QuestionMark),
+            ':' => Some(TokenKind::Colon),
+            _ => None,
+        }) {
+            return basic_token;
+        }
+
+        if self.accept_char('+') {
+            if self.accept_char('+') {
+                return TokenKind::PlusPlus;
+            }
+
+            return TokenKind::Plus;
+        }
+
+        if self.accept_char('-') {
+            if self.accept_char('-') {
+                return TokenKind::MinusMinus;
+            }
+
+            return TokenKind::Minus;
+        }
+
+        if self.accept_char('=') {
+            return if self.accept_char('=') {
+                TokenKind::BooleanEqual
+            } else {
+                TokenKind::Assign
+            };
+        }
+
+        if self.accept_char('"') {
+            let content = self.take_chars_while(|char| char != '"');
+            self.consume_char('"');
+
+            return TokenKind::StringLiteral(content);
+        }
+
+        if char.is_numeric() {
+            // TODO: support 0x, 0b, etc.
+            let int = self.take_chars_while(char::is_numeric).parse().unwrap();
+            return TokenKind::IntLiteral(int);
+        }
+
+        if char == '_' || char.is_alphabetic() {
+            let str = self.take_chars_while(|char| char == '_' || char.is_alphanumeric());
+
+            if let Some(token) = match str {
+                "if" => Some(TokenKind::If),
+                "else" => Some(TokenKind::Else),
+                "while" => Some(TokenKind::While),
+                "return" => Some(TokenKind::Return),
+                "struct" => Some(TokenKind::Struct),
+                "typedef" => Some(TokenKind::TypeDef),
+                "union" => Some(TokenKind::Union),
+                "enum" => Some(TokenKind::Enum),
+                "unsigned" => Some(TokenKind::Unsigned),
+                "signed" => Some(TokenKind::Signed),
+                "bool" => Some(TokenKind::Bool),
+                "int" => Some(TokenKind::Int),
+                "long" => Some(TokenKind::Long),
+                "short" => Some(TokenKind::Short),
+                "char" => Some(TokenKind::Char),
+                "float" => Some(TokenKind::Float),
+                "double" => Some(TokenKind::Double),
+                "void" => Some(TokenKind::Void),
+                "sizeof" => Some(TokenKind::SizeOf),
+                "const" => Some(TokenKind::Const),
+                _ => None,
+            } {
+                return token;
+            }
+
+            return TokenKind::Ident(str);
+        }
+
+        self.next_char();
+        TokenKind::Unknown(char)
+    }
+
     fn next_char_if<F>(&mut self, predicate: F) -> bool
     where
         F: FnOnce(char) -> bool,
@@ -251,6 +243,16 @@ impl<'a> Lexer<'a> {
         }
 
         false
+    }
+
+    pub fn maybe_map_next_char<F, R>(&mut self, map: F) -> Option<R>
+    where
+        F: FnOnce(char) -> Option<R>,
+    {
+        let out = map(self.peek_char()?)?;
+        self.next_char();
+
+        Some(out)
     }
 
     fn take_chars_while<F>(&mut self, predicate: F) -> &'a str
