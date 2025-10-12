@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::{lexer::tokenkind::TokenKind, span::Span};
 
+pub mod charreading;
 pub mod tokenkind;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -232,18 +233,6 @@ impl<'a> Lexer<'a> {
         TokenKind::Unknown(char)
     }
 
-    fn next_char_if<F>(&mut self, predicate: F) -> bool
-    where
-        F: FnOnce(char) -> bool,
-    {
-        if self.peek_char().filter(|&char| predicate(char)).is_some() {
-            self.next_char();
-            return true;
-        }
-
-        false
-    }
-
     pub fn maybe_map_next_char<F, R>(&mut self, map: F) -> Option<R>
     where
         F: FnOnce(char) -> Option<R>,
@@ -252,43 +241,6 @@ impl<'a> Lexer<'a> {
         self.next_char();
 
         Some(out)
-    }
-
-    fn take_chars_while<F>(&mut self, predicate: F) -> &'a str
-    where
-        F: Fn(char) -> bool,
-    {
-        let num = self
-            .chars
-            .clone()
-            .take_while(|&char| predicate(char))
-            .count();
-
-        if num == 0 {
-            return "";
-        }
-
-        let slice = &self.chars.as_str()[0..num];
-
-        self.chars.nth(num - 1);
-        self.index += num;
-
-        slice
-    }
-
-    fn accept_char(&mut self, expected: char) -> bool {
-        self.next_char_if(|char| char == expected)
-    }
-
-    fn consume_char(&mut self, expected: char) {
-        assert_eq!(self.next_char(), Some(expected));
-    }
-
-    fn next_char(&mut self) -> Option<char> {
-        let char = self.chars.next()?;
-        self.index += 1;
-
-        Some(char)
     }
 
     fn peek_char(&self) -> Option<char> {
