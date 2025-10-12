@@ -1,7 +1,9 @@
 use std::fmt::Display;
 
+use crate::lexer::Token;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TokenKind<'a> {
+pub(crate) enum TokenKind {
     Semicolon,
     OpenParen,
     CloseParen,
@@ -38,17 +40,23 @@ pub(crate) enum TokenKind<'a> {
     SizeOf,
     QuestionMark,
     Colon,
-    StringLiteral(&'a str),
+    StringLiteral(IdentId),
     IntLiteral(i32),
-    Ident(&'a str),
+    Ident(IdentId),
     Unknown(char),
     Eof,
+
+    /// Not a real source-code token! This will never be seen by the parser, and is an indiciation
+    /// inside the lexer regarding what's going on.
+    MacroExpansionMarker,
 }
 
-impl<'a> TryFrom<TokenKind<'a>> for &'static str {
+pub(crate) type IdentId = usize;
+
+impl TryFrom<TokenKind> for &'static str {
     type Error = ();
 
-    fn try_from(value: TokenKind<'a>) -> Result<Self, Self::Error> {
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
         Ok(match value {
             TokenKind::Semicolon => ";",
             TokenKind::OpenParen => "(",
@@ -87,26 +95,26 @@ impl<'a> TryFrom<TokenKind<'a>> for &'static str {
             TokenKind::QuestionMark => "?",
             TokenKind::Colon => ":",
 
-            TokenKind::StringLiteral(_)
-            | TokenKind::IntLiteral(_)
-            | TokenKind::Ident(_)
-            | TokenKind::Unknown(_) => return Err(()),
+            TokenKind::StringLiteral(_) => "string",
+            TokenKind::Ident(_) => "identifier",
+
+            TokenKind::IntLiteral(_) | TokenKind::Unknown(_) | TokenKind::MacroExpansionMarker => {
+                return Err(())
+            }
 
             TokenKind::Eof => "<<End Of File>>",
         })
     }
 }
 
-impl Display for TokenKind<'_> {
+impl Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Ok(str) = <&'static str>::try_from(*self) {
             return write!(f, "{str}");
         }
 
         match self {
-            TokenKind::StringLiteral(content) => write!(f, "\"{content}\""),
             TokenKind::IntLiteral(int) => write!(f, "{int}"),
-            TokenKind::Ident(name) => write!(f, "Ident({name})"),
             TokenKind::Unknown(char) => write!(f, "Unknown({char})"),
             _ => panic!("unhandled case {self:?}, somebody forgot to add it"),
         }

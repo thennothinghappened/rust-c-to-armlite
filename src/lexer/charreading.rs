@@ -23,6 +23,13 @@ impl<'a> Lexer<'a> {
         slice
     }
 
+    pub(super) fn take_chars_until<F>(&mut self, predicate: F) -> &'a str
+    where
+        F: Fn(char) -> bool,
+    {
+        self.take_chars_while(|char| !predicate(char))
+    }
+
     pub(super) fn accept_char(&mut self, expected: char) -> bool {
         self.next_char_if(|char| char == expected)
     }
@@ -49,4 +56,24 @@ impl<'a> Lexer<'a> {
 
         false
     }
+
+    pub(super) fn peek_char(&self) -> Option<char> {
+        self.chars.clone().next()
+    }
+
+    pub(super) fn skip_whitespace(&mut self) {
+        self.take_chars_while(is_whitespace);
+    }
+}
+
+pub(super) fn is_valid_identifier(char: char) -> bool {
+    char == '_' || char.is_alphanumeric()
+}
+
+pub(super) fn is_whitespace(char: char) -> bool {
+    char.is_whitespace()
+}
+
+pub(super) fn is_newline(char: char) -> bool {
+    char == '\n' || char == '\r'
 }

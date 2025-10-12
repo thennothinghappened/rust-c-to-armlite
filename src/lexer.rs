@@ -1,41 +1,60 @@
-use std::{collections::VecDeque, fmt::Display, str::Chars};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt::Display,
+    fs,
+    rc::Rc,
+    str::Chars,
+};
 
 use thiserror::Error;
 
-use crate::{lexer::tokenkind::TokenKind, span::Span};
+use crate::{
+    context::Context,
+    lexer::{
+        charreading::{is_newline, is_valid_identifier, is_whitespace},
+        tokenkind::{IdentId, TokenKind},
+    },
+    span::Span,
+};
 
 pub mod charreading;
 pub mod tokenkind;
 
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) struct Token<'a> {
-    pub kind: TokenKind<'a>,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Token {
+    pub kind: TokenKind,
     pub span: Span,
 }
 
-impl<'a> Token<'a> {
-    pub fn new(token: TokenKind<'a>, span: Span) -> Self {
+impl Token {
+    pub fn new(token: TokenKind, span: Span) -> Self {
         Self { kind: token, span }
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct Lexer<'a> {
+pub struct Lexer<'a> {
     pub index: usize,
     chars: Chars<'a>,
-    token_buffer_stream: VecDeque<Token<'a>>,
+    token_buffer_stream: VecDeque<Token>,
+    context: Rc<Context>,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(text: &'a str) -> Self {
+        Self::new_with_context(Context::default().into(), text)
+    }
+
+    fn new_with_context(context: Rc<Context>, text: &'a str) -> Self {
         Self {
             chars: text.chars(),
             index: 0,
             token_buffer_stream: Default::default(),
+            context,
         }
     }
 
-    pub fn next(&mut self) -> Token<'a> {
+    pub fn next(&mut self) -> Token {
         if let Some(peeked) = self.token_buffer_stream.pop_front() {
             return peeked;
         }
@@ -44,24 +63,29 @@ impl<'a> Lexer<'a> {
         self.take_chars_while(|char| char.is_ascii_whitespace());
 
         let start = self.index;
-        let token = self.lex_next();
-        Token::new(token, Span::new(start, self.index))
+        let kind = self.lex_next();
+
+        Token::new(kind, Span::new(start, self.index))
     }
 
-    pub fn peek(&mut self) -> Token<'a> {
+    pub fn peek(&mut self) -> Token {
         if let Some(peeked) = self.token_buffer_stream.front() {
             return *peeked;
         }
 
         let peeked = self.next();
-        self.token_buffer_stream.push_back(peeked);
 
+        if peeked.kind == TokenKind::MacroExpansionMarker {
+            return self.peek();
+        }
+
+        self.token_buffer_stream.push_back(peeked);
         peeked
     }
 
-    pub fn next_if<F>(&mut self, predicate: F) -> Option<Token<'a>>
+    pub fn next_if<F>(&mut self, predicate: F) -> Option<Token>
     where
-        F: FnOnce(TokenKind<'a>) -> bool,
+        F: FnOnce(TokenKind) -> bool,
     {
         let token = self.peek();
 
@@ -74,7 +98,7 @@ impl<'a> Lexer<'a> {
 
     pub fn maybe_map_next<F, R>(&mut self, map: F) -> Option<R>
     where
-        F: FnOnce(TokenKind<'a>) -> Option<R>,
+        F: FnOnce(TokenKind) -> Option<R>,
     {
         let out = map(self.peek().kind);
 
@@ -85,22 +109,24 @@ impl<'a> Lexer<'a> {
         out
     }
 
-    pub fn accept(&mut self, expected: TokenKind<'a>) -> bool {
+    pub fn accept(&mut self, expected: TokenKind) -> bool {
         self.next_if(|token| token == expected).is_some()
     }
 
-    pub fn next_is(&mut self, expected: TokenKind<'a>) -> bool {
+    pub fn next_is(&mut self, expected: TokenKind) -> bool {
         self.peek().kind == expected
     }
 
-    pub fn accept_ident(&mut self) -> Option<&'a str> {
-        self.maybe_map_next(|token| match token {
-            TokenKind::Ident(name) => Some(name),
-            _ => None,
-        })
+    pub fn accept_ident(&mut self) -> Option<String> {
+        if let TokenKind::Ident(id) = self.peek().kind {
+            self.next();
+            return Some(self.context.get_ident(id));
+        }
+
+        None
     }
 
-    pub fn consume(&mut self) -> Result<Token<'a>, LexerError<'a>> {
+    pub fn consume(&mut self) -> Result<Token, LexerError> {
         let token = self.next();
 
         if token.kind == TokenKind::Eof {
@@ -110,7 +136,7 @@ impl<'a> Lexer<'a> {
         Ok(token)
     }
 
-    pub fn expect(&mut self, expected: TokenKind<'static>) -> Result<Span, LexerError<'a>> {
+    pub fn expect(&mut self, expected: TokenKind) -> Result<Span, LexerError> {
         let token = self.consume()?;
 
         if token.kind == expected {
@@ -126,20 +152,20 @@ impl<'a> Lexer<'a> {
         })
     }
 
-    pub fn consume_ident(&mut self) -> Result<&'a str, LexerError<'a>> {
-        let tkinfo = self.consume()?;
+    pub fn consume_ident(&mut self) -> Result<String, LexerError> {
+        let Some(ident) = self.accept_ident() else {
+            let actual = self.peek().kind;
 
-        if let TokenKind::Ident(name) = tkinfo.kind {
-            return Ok(name);
-        }
+            return Err(self.err_here(LexerErrorKind::WrongToken {
+                expected: TokenKind::Ident(0),
+                actual,
+            }));
+        };
 
-        Err(LexerError::wrong_token(
-            TokenKind::Ident("identifier"),
-            tkinfo,
-        ))
+        Ok(ident)
     }
 
-    fn lex_next(&mut self) -> TokenKind<'a> {
+    fn lex_next(&mut self) -> TokenKind {
         let Some(char) = self.peek_char() else {
             return TokenKind::Eof;
         };
@@ -158,6 +184,57 @@ impl<'a> Lexer<'a> {
             _ => None,
         }) {
             return basic_token;
+        }
+
+        if self.accept_char('#') {
+            // Preprocessor directive!
+            let directive = self.take_chars_while(is_valid_identifier);
+
+            match directive {
+                "pragma" => {
+                    self.skip_whitespace();
+                    todo!("pragma directive")
+                }
+
+                "include" => {
+                    // We'll make a temporary lil lexer to deal with the new file, then brutally
+                    // murder it once it does its job (drop)
+                    self.skip_whitespace();
+
+                    if !self.accept_char('"') {
+                        todo!(
+                            "Recover from syntax error in #include directive: missing opening \""
+                        );
+                    }
+
+                    let path = self.take_chars_until(|char| char == '"' || is_newline(char));
+
+                    if !self.accept_char('"') {
+                        todo!(
+                            "Recover from syntax error in #include directive: missing closing \""
+                        );
+                    }
+
+                    let src = self.context.load_file(path);
+
+                    let mut temp_lexer =
+                        Lexer::new_with_context(self.context.clone(), src.as_str());
+
+                    loop {
+                        let token = temp_lexer.next();
+
+                        if token.kind == TokenKind::Eof {
+                            break;
+                        }
+
+                        self.token_buffer_stream.push_back(token);
+                    }
+
+                    return TokenKind::MacroExpansionMarker;
+                }
+
+                _ => panic!("Unknown directive `#{directive}`"),
+            }
         }
 
         if self.accept_char('+') {
@@ -188,7 +265,7 @@ impl<'a> Lexer<'a> {
             let content = self.take_chars_while(|char| char != '"');
             self.consume_char('"');
 
-            return TokenKind::StringLiteral(content);
+            return TokenKind::StringLiteral(self.context.allocate_ident(content));
         }
 
         if char.is_numeric() {
@@ -198,7 +275,7 @@ impl<'a> Lexer<'a> {
         }
 
         if char == '_' || char.is_alphabetic() {
-            let str = self.take_chars_while(|char| char == '_' || char.is_alphanumeric());
+            let str = self.take_chars_while(is_valid_identifier);
 
             if let Some(token) = match str {
                 "if" => Some(TokenKind::If),
@@ -226,7 +303,7 @@ impl<'a> Lexer<'a> {
                 return token;
             }
 
-            return TokenKind::Ident(str);
+            return TokenKind::Ident(self.context.allocate_ident(str));
         }
 
         self.next_char();
@@ -243,11 +320,7 @@ impl<'a> Lexer<'a> {
         Some(out)
     }
 
-    fn peek_char(&self) -> Option<char> {
-        self.chars.clone().next()
-    }
-
-    fn err_here(&self, err: LexerErrorKind<'a>) -> LexerError<'a> {
+    fn err_here(&self, err: LexerErrorKind) -> LexerError {
         LexerError {
             span: self
                 .token_buffer_stream
@@ -261,25 +334,25 @@ impl<'a> Lexer<'a> {
 
 #[derive(Debug, Error)]
 #[error("{kind} at {span}")]
-pub struct LexerError<'a> {
+pub struct LexerError {
     pub span: Span,
-    pub kind: LexerErrorKind<'a>,
+    pub kind: LexerErrorKind,
 }
 
 #[derive(Debug, Error)]
-pub enum LexerErrorKind<'a> {
+pub enum LexerErrorKind {
     #[error("Incorrect token {actual}, expected {expected}")]
     WrongToken {
-        expected: TokenKind<'static>,
-        actual: TokenKind<'a>,
+        expected: TokenKind,
+        actual: TokenKind,
     },
 
     #[error("Unexpected End Of File")]
     EarlyEof,
 }
 
-impl<'a> LexerError<'a> {
-    pub(super) fn wrong_token(expected: TokenKind<'static>, actual: Token<'a>) -> Self {
+impl LexerError {
+    pub(super) fn wrong_token(expected: TokenKind, actual: Token) -> Self {
         Self {
             span: actual.span,
             kind: LexerErrorKind::WrongToken {

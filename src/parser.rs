@@ -32,7 +32,7 @@ impl<'a> Parser<'a> {
     /// 1. Type declarations.
     /// 2. Global variables.
     /// 3. Function declarations (& definitions.)
-    pub fn parse(mut self) -> Result<Program, ParseError<'a>> {
+    pub fn parse(mut self) -> Result<Program, ParseError> {
         loop {
             match self.lexer.peek().kind {
                 TokenKind::Semicolon => {
@@ -64,7 +64,7 @@ impl<'a> Parser<'a> {
         Ok(self.program)
     }
 
-    fn parse_func_or_var_decl(&mut self) -> Result<Option<Statement>, ParseError<'a>> {
+    fn parse_func_or_var_decl(&mut self) -> Result<Option<Statement>, ParseError> {
         // This might be a lone type declaration, or it might be the start of a
         // function, or a variable...
         let initial_type = self.parse_type()?;
@@ -115,17 +115,14 @@ impl<'a> Parser<'a> {
         })))
     }
 
-    fn parse_variable_name(
-        &mut self,
-        initial_type: Type,
-    ) -> Result<(String, Type), ParseError<'a>> {
+    fn parse_variable_name(&mut self, initial_type: Type) -> Result<(String, Type), ParseError> {
         let this_type = self.parse_type_pointersssss(initial_type)?;
         let name = self.lexer.consume_ident()?;
 
         Ok((name.to_string(), this_type))
     }
 
-    fn parse_type_pointersssss(&mut self, initial_type: Type) -> Result<Type, ParseError<'a>> {
+    fn parse_type_pointersssss(&mut self, initial_type: Type) -> Result<Type, ParseError> {
         let mut this_type = initial_type;
 
         // Evil right-associative pointer syntax >:(((
@@ -136,7 +133,7 @@ impl<'a> Parser<'a> {
         Ok(this_type)
     }
 
-    fn parse_func_decl_args(&mut self) -> Result<Vec<Member>, ParseError<'a>> {
+    fn parse_func_decl_args(&mut self) -> Result<Vec<Member>, ParseError> {
         let mut args: Vec<Member> = Vec::new();
 
         self.lexer.expect(TokenKind::OpenParen)?;
@@ -147,7 +144,7 @@ impl<'a> Parser<'a> {
             let arg_name = self.lexer.accept_ident();
 
             args.push(Member {
-                name: arg_name.map(str::to_string),
+                name: arg_name,
                 type_info: arg_type,
             });
 
@@ -161,7 +158,7 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    fn parse_block(&mut self) -> Result<Statement, ParseError<'a>> {
+    fn parse_block(&mut self) -> Result<Statement, ParseError> {
         let mut statements: Vec<Statement> = Vec::new();
 
         self.lexer.expect(TokenKind::OpenCurly)?;
@@ -180,7 +177,7 @@ impl<'a> Parser<'a> {
         Ok(Statement::Block(statements))
     }
 
-    fn parse_statement(&mut self) -> Result<Statement, ParseError<'a>> {
+    fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.lexer.peek().kind {
             TokenKind::OpenCurly => self.parse_block(),
 
@@ -252,7 +249,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_variable_decl(&mut self) -> Result<Statement, ParseError<'a>> {
+    fn parse_variable_decl(&mut self) -> Result<Statement, ParseError> {
         let initial_type = self.parse_type()?;
 
         // todo: support multiple decls on same line (ew)
@@ -271,7 +268,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    fn parse_expr_in_brackets(&mut self) -> Result<Expr, ParseError<'a>> {
+    fn parse_expr_in_brackets(&mut self) -> Result<Expr, ParseError> {
         self.lexer.expect(TokenKind::OpenParen)?;
         let expr = self.parse_expr(0)?;
         self.lexer.expect(TokenKind::CloseParen)?;
@@ -279,7 +276,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_expr(&mut self, min_power: i32) -> Result<Expr, ParseError<'a>> {
+    fn parse_expr(&mut self, min_power: i32) -> Result<Expr, ParseError> {
         let mut lhs = self.parse_unary_expr()?;
 
         while let Some(op) = self.lexer.maybe_map_next(|token| {
@@ -300,7 +297,7 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn parse_unary_expr(&mut self) -> Result<Expr, ParseError<'a>> {
+    fn parse_unary_expr(&mut self) -> Result<Expr, ParseError> {
         if self.lexer.next_is(TokenKind::OpenParen) {
             // rust stop asking me to collapse this pretty pls
             if self.clone().parse_cast_expr().is_ok() {
@@ -321,7 +318,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::UnaryOp(op, Box::new(operand)))
     }
 
-    fn parse_postfix_expr(&mut self) -> Result<Expr, ParseError<'a>> {
+    fn parse_postfix_expr(&mut self) -> Result<Expr, ParseError> {
         let mut operand = self.parse_terminal_expr()?;
 
         while self.lexer.accept(TokenKind::OpenParen) {
@@ -358,7 +355,7 @@ impl<'a> Parser<'a> {
         Ok(operand)
     }
 
-    fn parse_cast_expr(&mut self) -> Result<Expr, ParseError<'a>> {
+    fn parse_cast_expr(&mut self) -> Result<Expr, ParseError> {
         self.lexer.expect(TokenKind::OpenParen)?;
         let initial_type = self.parse_type()?;
         let target_type = self.parse_type_pointersssss(initial_type)?;
@@ -368,7 +365,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::Cast(Box::new(expr), target_type))
     }
 
-    fn parse_terminal_expr(&mut self) -> Result<Expr, ParseError<'a>> {
+    fn parse_terminal_expr(&mut self) -> Result<Expr, ParseError> {
         match self.lexer.peek().kind {
             TokenKind::Ident(name) => {
                 self.lexer.next();
@@ -391,7 +388,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_typedef(&mut self) -> Result<(), ParseError<'a>> {
+    fn parse_typedef(&mut self) -> Result<(), ParseError> {
         self.lexer.expect(TokenKind::TypeDef)?;
 
         let initial_type = self.parse_type()?;
@@ -411,9 +408,9 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn parse_struct(&mut self) -> Result<Type, ParseError<'a>> {
+    fn parse_struct(&mut self) -> Result<Type, ParseError> {
         let start = self.lexer.expect(TokenKind::Struct)?;
-        let struct_name = self.lexer.accept_ident().map(str::to_string);
+        let struct_name = self.lexer.accept_ident();
 
         if !self.lexer.accept(TokenKind::OpenCurly) {
             let Some(struct_name) = struct_name else {
@@ -469,20 +466,17 @@ impl<'a> Parser<'a> {
     /// C's pointer syntax is such that you can't know the full type until you then look at each
     /// variable (or what have you), as the "*" part of the type is right-associative *for some
     /// reason*.
-    fn parse_type(&mut self) -> Result<Type, ParseError<'a>> {
+    fn parse_type(&mut self) -> Result<Type, ParseError> {
         match self.lexer.peek().kind {
             // Inline struct type.
             TokenKind::Struct => self.parse_struct(),
 
             // Typedef'd something-or-other!
-            TokenKind::Ident(name) => {
-                self.lexer.next();
-
-                self.program
-                    .typedef_get_id(name)
-                    .map(|&id| Type::WithId(id))
-                    .ok_or_else(|| self.unexpected_token())
-            }
+            TokenKind::Ident(_) => self
+                .program
+                .typedef_get_id(&self.lexer.consume_ident()?)
+                .map(|&id| Type::WithId(id))
+                .ok_or_else(|| self.unexpected_token()),
 
             // Maybe we've got a number?
             _ => self
@@ -491,7 +485,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_numeric_type(&mut self) -> Result<BuiltInType, ParseError<'a>> {
+    fn parse_numeric_type(&mut self) -> Result<BuiltInType, ParseError> {
         if self.lexer.accept(TokenKind::Unsigned) {
             return self
                 .parse_terminal_numeric_type()?
@@ -509,7 +503,7 @@ impl<'a> Parser<'a> {
         self.parse_terminal_numeric_type()
     }
 
-    fn parse_terminal_numeric_type(&mut self) -> Result<BuiltInType, ParseError<'a>> {
+    fn parse_terminal_numeric_type(&mut self) -> Result<BuiltInType, ParseError> {
         if let Some(basic_type) = self.lexer.maybe_map_next(|token| match token {
             TokenKind::Void => Some(BuiltInType::Void),
             TokenKind::Bool => Some(BuiltInType::Bool),
@@ -556,14 +550,14 @@ impl<'a> Parser<'a> {
         while self.lexer.accept(TokenKind::Semicolon) {}
     }
 
-    fn unexpected_eof(&self) -> ParseError<'a> {
+    fn unexpected_eof(&self) -> ParseError {
         ParseError {
             span: Span::at(self.lexer.index),
             kind: ParseErrorKind::EarlyEof,
         }
     }
 
-    fn unexpected_token(&mut self) -> ParseError<'a> {
+    fn unexpected_token(&mut self) -> ParseError {
         let Token { kind, span } = self.lexer.peek();
 
         if kind == TokenKind::Eof {
@@ -576,11 +570,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn bad_definition<S: Into<Span>, E: Into<ParseErrorKind<'a>>>(
+    fn bad_definition<S: Into<Span>, E: Into<ParseErrorKind>>(
         &self,
         span: S,
         err: E,
-    ) -> ParseError<'a> {
+    ) -> ParseError {
         ParseError {
             span: span.into(),
             kind: err.into(),
@@ -590,20 +584,20 @@ impl<'a> Parser<'a> {
 
 #[derive(Debug, Error)]
 #[error("{kind} at {span}")]
-pub struct ParseError<'a> {
+pub struct ParseError {
     pub span: Span,
-    pub kind: ParseErrorKind<'a>,
+    pub kind: ParseErrorKind,
 }
 
 #[derive(Debug, Error)]
-pub enum ParseErrorKind<'a> {
+pub enum ParseErrorKind {
     #[error("Unexpected token {0}")]
-    UnexpectedToken(TokenKind<'a>),
+    UnexpectedToken(TokenKind),
 
     #[error("Unexpected token {actual}, expected {expected}")]
     WrongToken {
-        expected: TokenKind<'static>,
-        actual: TokenKind<'a>,
+        expected: TokenKind,
+        actual: TokenKind,
     },
 
     #[error("Unexpected End Of File")]
@@ -616,8 +610,8 @@ pub enum ParseErrorKind<'a> {
     DefineTypeError(#[from] DefineTypeError),
 }
 
-impl<'a> From<LexerError<'a>> for ParseError<'a> {
-    fn from(value: LexerError<'a>) -> Self {
+impl<'a> From<LexerError> for ParseError {
+    fn from(value: LexerError) -> Self {
         Self {
             span: value.span,
             kind: value.kind.into(),
@@ -625,8 +619,8 @@ impl<'a> From<LexerError<'a>> for ParseError<'a> {
     }
 }
 
-impl<'a> From<LexerErrorKind<'a>> for ParseErrorKind<'a> {
-    fn from(value: LexerErrorKind<'a>) -> Self {
+impl<'a> From<LexerErrorKind> for ParseErrorKind {
+    fn from(value: LexerErrorKind) -> Self {
         match value {
             LexerErrorKind::WrongToken { expected, actual } => {
                 ParseErrorKind::WrongToken { expected, actual }

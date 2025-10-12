@@ -1,11 +1,7 @@
 
-typedef unsigned long long uint64_t;
+#include "test.h"
 
-typedef struct
-{
-	uint64_t length;
-	char* buf;
-} String;
+int a;
 
 int main() {
 	String String;

@@ -12,6 +12,7 @@ use codespan_reporting::{
 
 use crate::{lexer::Lexer, parser::Parser};
 
+mod context;
 mod lexer;
 mod parser;
 mod span;

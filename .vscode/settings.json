@@ -1,0 +1,14 @@
+{
+    "files.associations": {
+        "*.pc": "json",
+        "*.gmplugin": "json",
+        "*.bff": "json",
+        "*.txt": "plaintext",
+        "*.yyp": "json5",
+        "*.yy": "json5",
+        "*.gml": "gml",
+        "*.armlite": "arm",
+        "random": "c",
+        "test.h": "c"
+    }
+}
