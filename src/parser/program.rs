@@ -90,8 +90,8 @@ impl Program {
             if *old_type != variable.var_type {
                 return Err(DeclareGlobalVarError::RedefinitionDifferingType(
                     variable.name,
-                    Box::new(self.resolve_concrete_type(old_type.clone()).unwrap()),
-                    Box::new(self.resolve_concrete_type(variable.var_type).unwrap()),
+                    Box::new(self.resolve_concrete_type(old_type).unwrap()),
+                    Box::new(self.resolve_concrete_type(&variable.var_type).unwrap()),
                 ));
             }
 
@@ -114,9 +114,9 @@ impl Program {
         Ok(())
     }
 
-    pub fn resolve_concrete_type(&self, ref_type: Type) -> Option<TypeInfo> {
+    pub fn resolve_concrete_type(&self, ref_type: &Type) -> Option<TypeInfo> {
         match ref_type {
-            Type::Inline(type_info) => Some(type_info),
+            Type::Inline(type_info) => Some(type_info.clone()),
             Type::WithId(id) => Some(self.get_type_by_id(&id)?.clone()),
         }
     }
@@ -139,6 +139,10 @@ impl Program {
 
         self.id_to_concrete_type.insert(type_id, type_info);
         type_id
+    }
+
+    pub fn get_functions(&self) -> &HashMap<String, Function> {
+        &self.functions
     }
 }
 

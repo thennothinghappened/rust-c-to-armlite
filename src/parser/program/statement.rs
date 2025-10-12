@@ -2,7 +2,7 @@ use crate::parser::program::{expr::Expr, types::Type};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
-    Block(Vec<Statement>),
+    Block(Block),
     Declare(Variable),
     Expr(Expr),
 
@@ -18,6 +18,15 @@ pub enum Statement {
     },
 
     Return(Box<Expr>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block(pub Vec<Statement>);
+
+impl From<Block> for Statement {
+    fn from(value: Block) -> Self {
+        Statement::Block(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

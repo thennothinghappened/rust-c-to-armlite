@@ -1,7 +1,12 @@
 
 #include "test.h"
 
-int a;
+int a = 2;
+
+int do_a_thing(int input)
+{
+	return input;
+}
 
 int main() {
 	String String;

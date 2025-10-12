@@ -4,7 +4,7 @@ use crate::{
     lexer::{tokenkind::TokenKind, Lexer, LexerError, LexerErrorKind, Token},
     parser::program::{
         expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
-        statement::{Statement, Variable},
+        statement::{Block, Statement, Variable},
         types::{BuiltInType, Function, Member, Struct, Type, TypeDef, TypeInfo},
         DefineTypeError, Program, StructBuilder,
     },
@@ -85,7 +85,7 @@ impl<'a> Parser<'a> {
 
             // May or may not have function body.
             let body = if self.lexer.next_is(TokenKind::OpenCurly) {
-                Some(Box::new(self.parse_block()?))
+                Some(self.parse_block()?)
             } else {
                 self.lexer.expect(TokenKind::Semicolon)?;
                 None
@@ -158,7 +158,7 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    fn parse_block(&mut self) -> Result<Statement, ParseError> {
+    fn parse_block(&mut self) -> Result<Block, ParseError> {
         let mut statements: Vec<Statement> = Vec::new();
 
         self.lexer.expect(TokenKind::OpenCurly)?;
@@ -174,12 +174,12 @@ impl<'a> Parser<'a> {
             statements.push(self.parse_statement()?);
         }
 
-        Ok(Statement::Block(statements))
+        Ok(Block(statements))
     }
 
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
         match self.lexer.peek().kind {
-            TokenKind::OpenCurly => self.parse_block(),
+            TokenKind::OpenCurly => Ok(self.parse_block()?.into()),
 
             TokenKind::If => {
                 self.lexer.next();

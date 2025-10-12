@@ -1,4 +1,7 @@
-use crate::parser::program::{statement::Statement, TypeId};
+use crate::parser::program::{
+    statement::{Block, Statement},
+    TypeId,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -90,7 +93,7 @@ impl BuiltInType {
 pub struct Function {
     pub args: Vec<Member>,
     pub return_type: Box<Type>,
-    pub body: Option<Box<Statement>>,
+    pub body: Option<Block>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

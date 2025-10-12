@@ -12,6 +12,7 @@ use codespan_reporting::{
 
 use crate::{lexer::Lexer, parser::Parser};
 
+mod codegen;
 mod context;
 mod lexer;
 mod parser;
@@ -75,4 +76,7 @@ fn parse_program(
     };
 
     println!("Program: {program}");
+
+    let output = codegen::generate(program);
+    println!("--- Code generated ---\n{output}");
 }
