@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::Chars};
+use std::{collections::VecDeque, fmt::Display, str::Chars};
 
 use thiserror::Error;
 
@@ -22,7 +22,7 @@ impl<'a> Token<'a> {
 pub(crate) struct Lexer<'a> {
     pub index: usize,
     chars: Chars<'a>,
-    maybe_peeked: Option<Token<'a>>,
+    token_buffer_stream: VecDeque<Token<'a>>,
 }
 
 impl<'a> Lexer<'a> {
@@ -30,13 +30,12 @@ impl<'a> Lexer<'a> {
         Self {
             chars: text.chars(),
             index: 0,
-            maybe_peeked: None,
+            token_buffer_stream: Default::default(),
         }
     }
 
     pub fn next(&mut self) -> Token<'a> {
-        if let Some(peeked) = self.maybe_peeked {
-            self.maybe_peeked = None;
+        if let Some(peeked) = self.token_buffer_stream.pop_front() {
             return peeked;
         }
 
@@ -49,12 +48,12 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn peek(&mut self) -> Token<'a> {
-        if let Some(peeked) = self.maybe_peeked {
-            return peeked;
+        if let Some(peeked) = self.token_buffer_stream.front() {
+            return *peeked;
         }
 
         let peeked = self.next();
-        self.maybe_peeked = Some(peeked);
+        self.token_buffer_stream.push_back(peeked);
 
         peeked
     }
@@ -299,7 +298,8 @@ impl<'a> Lexer<'a> {
     fn err_here(&self, err: LexerErrorKind<'a>) -> LexerError<'a> {
         LexerError {
             span: self
-                .maybe_peeked
+                .token_buffer_stream
+                .front()
                 .map(|tk| tk.span)
                 .unwrap_or(Span::at(self.index)),
             kind: err,
