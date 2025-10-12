@@ -137,7 +137,7 @@ impl Program {
         let type_id = self.next_type_id;
         self.next_type_id = self.next_type_id.next();
 
-        self.id_to_concrete_type.insert(type_id, type_info.into());
+        self.id_to_concrete_type.insert(type_id, type_info);
         type_id
     }
 }
