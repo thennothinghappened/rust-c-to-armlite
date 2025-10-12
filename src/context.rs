@@ -13,6 +13,7 @@ use crate::lexer::tokenkind::IdentId;
 pub(crate) struct Context {
     sources: RefCell<HashMap<String, Rc<String>>>,
     idents: RefCell<Vec<Rc<String>>>,
+    macros: RefCell<HashMap<String, Rc<String>>>,
 }
 
 impl Context {
@@ -37,5 +38,15 @@ impl Context {
 
     pub(crate) fn get_ident(&self, id: IdentId) -> String {
         (*self.idents.borrow()[id]).clone()
+    }
+
+    pub(crate) fn preproc_define(&self, name: impl Into<String>, value: impl Into<String>) {
+        self.macros
+            .borrow_mut()
+            .insert(name.into(), Rc::new(value.into()));
+    }
+
+    pub(crate) fn preproc_get(&self, name: &str) -> Option<Rc<String>> {
+        self.macros.borrow().get(name).cloned()
     }
 }

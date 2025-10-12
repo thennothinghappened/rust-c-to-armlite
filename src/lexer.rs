@@ -38,6 +38,7 @@ pub struct Lexer<'a> {
     chars: Chars<'a>,
     token_buffer_stream: VecDeque<Token>,
     context: Rc<Context>,
+    if_stack_depth: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -51,21 +52,28 @@ impl<'a> Lexer<'a> {
             index: 0,
             token_buffer_stream: Default::default(),
             context,
+            if_stack_depth: 0,
         }
     }
 
     pub fn next(&mut self) -> Token {
-        if let Some(peeked) = self.token_buffer_stream.pop_front() {
-            return peeked;
+        loop {
+            if let Some(peeked) = self.token_buffer_stream.pop_front() {
+                return peeked;
+            }
+
+            self.skip_whitespace_and_newlines();
+
+            let start = self.index;
+            let kind = self.lex_next();
+            let end = self.index;
+
+            if kind == TokenKind::MacroExpansionMarker {
+                continue;
+            }
+
+            return Token::new(kind, Span::new(start, end));
         }
-
-        // Discard whitespace.
-        self.take_chars_while(|char| char.is_ascii_whitespace());
-
-        let start = self.index;
-        let kind = self.lex_next();
-
-        Token::new(kind, Span::new(start, self.index))
     }
 
     pub fn peek(&mut self) -> Token {
@@ -74,12 +82,8 @@ impl<'a> Lexer<'a> {
         }
 
         let peeked = self.next();
+        self.token_buffer_stream.push_front(peeked);
 
-        if peeked.kind == TokenKind::MacroExpansionMarker {
-            return self.peek();
-        }
-
-        self.token_buffer_stream.push_back(peeked);
         peeked
     }
 
@@ -229,12 +233,35 @@ impl<'a> Lexer<'a> {
 
                         self.token_buffer_stream.push_back(token);
                     }
+                }
 
-                    return TokenKind::MacroExpansionMarker;
+                "ifndef" => self.ifdef(true),
+                "ifdef" => self.ifdef(false),
+
+                "endif" => {
+                    if self.if_stack_depth == 0 {
+                        todo!("handle unbalanced #if/#endif stack")
+                    }
+
+                    self.if_stack_depth -= 1;
+                }
+
+                "define" => {
+                    self.skip_whitespace();
+                    let definition_name = self.take_chars_while(is_valid_identifier);
+                    self.skip_whitespace();
+
+                    if !self.accept_newline() {
+                        todo!("#define with value!");
+                    }
+
+                    self.context.preproc_define(definition_name, "");
                 }
 
                 _ => panic!("Unknown directive `#{directive}`"),
             }
+
+            return TokenKind::MacroExpansionMarker;
         }
 
         if self.accept_char('+') {
@@ -308,6 +335,43 @@ impl<'a> Lexer<'a> {
 
         self.next_char();
         TokenKind::Unknown(char)
+    }
+
+    fn ifdef(&mut self, is_if_not_def: bool) {
+        self.skip_whitespace();
+        let definition_name = self.take_chars_while(is_valid_identifier);
+
+        if self.context.preproc_get(definition_name).is_none() == is_if_not_def {
+            self.if_stack_depth += 1;
+        } else {
+            // FIXME: this is a very bad way of doing this because strings n stuff could cause
+            // issues. lets pretend those dont exist for now :P
+            let mut if_stack_depth = 1;
+
+            while if_stack_depth > 0 {
+                self.take_chars_until(|char| char == '#');
+
+                if self.next_char().is_none() {
+                    break;
+                }
+
+                let directive = self.take_chars_while(is_valid_identifier);
+
+                match directive {
+                    "if" | "ifdef" | "ifndef" => {
+                        if_stack_depth += 1;
+                    }
+
+                    "endif" => {
+                        if_stack_depth -= 1;
+                    }
+
+                    _ => (),
+                }
+
+                self.take_chars_until(is_newline);
+            }
+        }
     }
 
     pub fn maybe_map_next_char<F, R>(&mut self, map: F) -> Option<R>

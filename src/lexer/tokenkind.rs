@@ -98,10 +98,9 @@ impl TryFrom<TokenKind> for &'static str {
             TokenKind::StringLiteral(_) => "string",
             TokenKind::Ident(_) => "identifier",
 
-            TokenKind::IntLiteral(_) | TokenKind::Unknown(_) | TokenKind::MacroExpansionMarker => {
-                return Err(())
-            }
+            TokenKind::IntLiteral(_) | TokenKind::Unknown(_) => return Err(()),
 
+            TokenKind::MacroExpansionMarker => "<<Macro Expansion>>",
             TokenKind::Eof => "<<End Of File>>",
         })
     }

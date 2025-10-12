@@ -61,8 +61,28 @@ impl<'a> Lexer<'a> {
         self.chars.clone().next()
     }
 
+    /// Skip valid whitespace characters. Newlines are **NOT** considered whitespace.
     pub(super) fn skip_whitespace(&mut self) {
         self.take_chars_while(is_whitespace);
+    }
+
+    /// Skip valid whitespace characters and line breaks.
+    pub(super) fn skip_whitespace_and_newlines(&mut self) {
+        self.take_chars_while(is_whitespace_or_newline);
+    }
+
+    /// Optionally accept a new line character. The forms `\n`, `\r\n`, and `\r` are accepted.
+    pub(super) fn accept_newline(&mut self) -> bool {
+        if self.accept_char('\n') {
+            return true;
+        }
+
+        if self.accept_char('\r') {
+            self.accept_char('\n');
+            return true;
+        }
+
+        false
     }
 }
 
@@ -71,7 +91,11 @@ pub(super) fn is_valid_identifier(char: char) -> bool {
 }
 
 pub(super) fn is_whitespace(char: char) -> bool {
-    char.is_whitespace()
+    char.is_whitespace() && !is_newline(char)
+}
+
+pub(super) fn is_whitespace_or_newline(char: char) -> bool {
+    char.is_whitespace() || is_newline(char)
 }
 
 pub(super) fn is_newline(char: char) -> bool {
