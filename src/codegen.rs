@@ -76,7 +76,7 @@ impl Generator {
             TypeInfo::Pointer(_) => 4,
 
             TypeInfo::BuiltIn(built_in_type) => match built_in_type {
-                BuiltInType::Void => panic!("void doesn't have a size!"),
+                BuiltInType::Void => 0,
                 BuiltInType::Bool => 1,
                 BuiltInType::Char => 1,
                 BuiltInType::SignedChar => 1,
