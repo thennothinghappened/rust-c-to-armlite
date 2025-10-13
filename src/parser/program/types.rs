@@ -15,7 +15,6 @@ pub enum TypeInfo {
     BuiltIn(BuiltInType),
     Struct(Struct),
     Enum(Enum),
-    Function(Function),
     Const(Box<Type>),
 }
 
