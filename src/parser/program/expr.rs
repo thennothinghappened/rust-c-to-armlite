@@ -26,6 +26,14 @@ pub enum BinaryOp {
 
     /// Assign whatever LHS resolves to, to the evaluated value of RHS, and return that value.
     Assign,
+
+    BooleanEqual,
+
+    LessThan,
+
+    Plus,
+
+    ArraySubscript,
 }
 
 impl BindingPower for BinaryOp {
@@ -34,18 +42,11 @@ impl BindingPower for BinaryOp {
         match self {
             BinaryOp::AndThen => 0,
             BinaryOp::Assign => 1,
+            BinaryOp::BooleanEqual => 7,
+            BinaryOp::LessThan => 8,
+            BinaryOp::Plus => 13,
+            BinaryOp::ArraySubscript => 14,
         }
-    }
-}
-
-impl Display for BinaryOp {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            BinaryOp::AndThen => ", ",
-            BinaryOp::Assign => " = ",
-        };
-
-        write!(f, "{str}")
     }
 }
 
@@ -90,7 +91,14 @@ impl Display for Expr {
 
             Expr::Call(call) => write!(f, "{call}"),
 
-            Expr::BinaryOp(op, lhs, rhs) => write!(f, "{lhs}{op}{rhs}"),
+            Expr::BinaryOp(op, lhs, rhs) => match op {
+                BinaryOp::AndThen => write!(f, "{lhs}, {rhs}"),
+                BinaryOp::Assign => write!(f, "{lhs} = {rhs}"),
+                BinaryOp::BooleanEqual => write!(f, "{lhs} == {rhs}"),
+                BinaryOp::LessThan => write!(f, "{lhs} < {rhs}"),
+                BinaryOp::Plus => write!(f, "{lhs} + {rhs}"),
+                BinaryOp::ArraySubscript => write!(f, "{lhs}[{rhs}]"),
+            },
 
             Expr::Cast(expr, type_id) => write!(f, "({type_id:?}){expr}"),
 

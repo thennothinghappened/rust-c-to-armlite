@@ -12,6 +12,7 @@ pub enum Type {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeInfo {
     Pointer(Box<Type>),
+    Array(Box<Type>, u32),
     BuiltIn(BuiltInType),
     Struct(Struct),
     Enum(Enum),

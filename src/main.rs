@@ -77,6 +77,6 @@ fn parse_program(
 
     println!("Program: {program}");
 
-    let output = codegen::generate(program);
+    let output = codegen::Generator::new(program).generate();
     println!("--- Code generated ---\n{output}");
 }

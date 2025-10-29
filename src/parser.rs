@@ -116,8 +116,30 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_variable_name(&mut self, initial_type: Type) -> Result<(String, Type), ParseError> {
-        let this_type = self.parse_type_pointersssss(initial_type)?;
+        let mut this_type = self.parse_type_pointersssss(initial_type)?;
         let name = self.lexer.consume_ident()?;
+
+        if self.lexer.accept(TokenKind::OpenSquare) {
+            let element_count = self
+                .lexer
+                .maybe_map_next(|kind| match kind {
+                    TokenKind::IntLiteral(element_count) => Some(element_count),
+                    _ => None,
+                })
+                .ok_or_else(|| ParseError {
+                    span: Span::at(self.lexer.index),
+                    kind: ParseErrorKind::UnexpectedToken(self.lexer.next().kind),
+                })?;
+
+            self.lexer.expect(TokenKind::CloseSquare)?;
+
+            this_type = Type::Inline(TypeInfo::Array(
+                Box::new(this_type),
+                element_count
+                    .try_into()
+                    .expect("must be a positive array size"),
+            ));
+        }
 
         Ok((name.to_string(), this_type))
     }
@@ -283,6 +305,9 @@ impl<'a> Parser<'a> {
             match token {
                 TokenKind::Comma => Some(BinaryOp::AndThen),
                 TokenKind::Assign => Some(BinaryOp::Assign),
+                TokenKind::BooleanEqual => Some(BinaryOp::BooleanEqual),
+                TokenKind::LessThan => Some(BinaryOp::LessThan),
+                TokenKind::Plus => Some(BinaryOp::Plus),
                 _ => None,
             }
             .filter(|op| op.binding_power() >= min_power)
@@ -321,35 +346,53 @@ impl<'a> Parser<'a> {
     fn parse_postfix_expr(&mut self) -> Result<Expr, ParseError> {
         let mut operand = self.parse_terminal_expr()?;
 
-        while self.lexer.accept(TokenKind::OpenParen) {
-            // Function call args!
-            let mut args: Vec<Expr> = Vec::new();
+        loop {
+            if self.lexer.accept(TokenKind::OpenParen) {
+                // Function call args!
+                let mut args: Vec<Expr> = Vec::new();
 
-            while !self.lexer.accept(TokenKind::CloseParen) {
-                // Args are not allowed to use the comma operator, since that'd conflict with
-                // comma being the function arg separator.
-                args.push(self.parse_expr(BinaryOp::AndThen.binding_power() + 1)?);
+                while !self.lexer.accept(TokenKind::CloseParen) {
+                    // Args are not allowed to use the comma operator, since that'd conflict with
+                    // comma being the function arg separator.
+                    args.push(self.parse_expr(BinaryOp::AndThen.binding_power() + 1)?);
 
-                if !self.lexer.accept(TokenKind::Comma) {
-                    self.lexer.expect(TokenKind::CloseParen)?;
-                    break;
+                    if !self.lexer.accept(TokenKind::Comma) {
+                        self.lexer.expect(TokenKind::CloseParen)?;
+                        break;
+                    }
                 }
+
+                operand = Expr::Call(Call {
+                    target: Box::new(operand),
+                    args,
+                });
+
+                continue;
             }
 
-            operand = Expr::Call(Call {
-                target: Box::new(operand),
-                args,
-            });
-        }
+            // FIXME: i think currently you can't go like, func()++() tho that seems like nonsense
+            // anyway lol
+            if let Some(op) = self.lexer.maybe_map_next(|token| match token {
+                TokenKind::PlusPlus => Some(UnaryOp::GetThenIncrement),
+                TokenKind::MinusMinus => Some(UnaryOp::GetThenDecrement),
+                _ => None,
+            }) {
+                operand = Expr::UnaryOp(op, Box::new(operand));
+                continue;
+            }
 
-        // FIXME: i think currently you can't go like, func()++() tho that seems like nonsense
-        // anyway lol
-        while let Some(op) = self.lexer.maybe_map_next(|token| match token {
-            TokenKind::PlusPlus => Some(UnaryOp::GetThenIncrement),
-            TokenKind::MinusMinus => Some(UnaryOp::GetThenDecrement),
-            _ => None,
-        }) {
-            operand = Expr::UnaryOp(op, Box::new(operand));
+            if self.lexer.accept(TokenKind::OpenSquare) {
+                operand = Expr::BinaryOp(
+                    BinaryOp::ArraySubscript,
+                    Box::new(operand),
+                    Box::new(self.parse_expr(0)?),
+                );
+
+                self.lexer.expect(TokenKind::CloseSquare)?;
+                continue;
+            }
+
+            break;
         }
 
         Ok(operand)
