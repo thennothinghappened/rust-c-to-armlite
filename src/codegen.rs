@@ -1,8 +1,9 @@
 //! ARMLite code generation from a `Program`.
 
-use std::{cell::Cell, collections::HashMap};
+use std::{cell::Cell, collections::HashMap, sync::LazyLock};
 
 use itertools::Itertools;
+use phf::phf_map;
 
 use crate::parser::{
     program::{
@@ -38,26 +39,17 @@ c_halt:
 const_c_entry_exitcode_msg_start: .ASCIZ "Program exited with code "
 const_c_entry_exitcode_msg_end: .ASCIZ ".\n"
 
-fn_WriteString:
-	STR R0, .WriteString
-	RET
-
-fn_WriteSignedNum:
-	STR R0, .WriteSignedNum
-	RET
-
-fn_WriteUnsignedNum:
-	STR R0, .WriteUnsignedNum
-	RET
-
-fn_ReadString:
-	STR R0, .ReadString
-	RET
-
 ; ==================================================================================================
-; BEGIN USER CODE
+; END OF PRELUDE
 ; ==================================================================================================
 "#;
+
+static BUILTIN_FUNCS: phf::Map<&str, &str> = phf_map! {
+    "WriteString" => "\tSTR R0, .WriteString\n\tRET",
+    "WriteSignedNum" => "\tSTR R0, .WriteSignedNum\n\tRET",
+    "WriteUnsignedNum" => "\tSTR R0, .WriteUnsignedNum\n\tRET",
+    "ReadString" => "\tSTR R0, .ReadString\n\tRET",
+};
 
 pub struct Generator {
     program: Program,
@@ -101,6 +93,12 @@ impl Generator {
 
         output += &format!("{}:\n", self.name_of_func(func_name));
 
+        // Hack to allow built-ins (inline asm) to work with the existing system :)
+        if let Some(builtin_content) = BUILTIN_FUNCS.get(func_name) {
+            output += builtin_content;
+            return output;
+        }
+
         let Some(Block(statements)) = &func.body else {
             panic!("Function {func:?} left undefined!");
         };
@@ -108,7 +106,7 @@ impl Generator {
         output += "\tPUSH {R11, LR}\n";
         output += "\tMOV R11, SP\n";
 
-        let mut scope = GenScope::new(&self, func_name);
+        let mut scope = GenScope::new(self, func_name);
         let body_content = self.generate_block(&mut scope, statements);
 
         output += "\n\t; # Stack Locals\n";

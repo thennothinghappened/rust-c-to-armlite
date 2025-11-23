@@ -1,24 +1,17 @@
 
-#include "test.h"
-
-int a = 2;
-
-int do_a_thing(int input)
-{
-	return input;
-}
+#include "armlite.h"
 
 int main() {
-	String String;
-	char* stuff = "hi";
-	uint64_t num = 3;
+	int a = 2;
+	int b = 3;
+	int c = 0;
 
-	if (num) {
-		num = 4;
+	if (a < b) {
+		c = a;
+	} else {
+		c = b;
 	}
 
-	num, num;
-	int* things = (void*)main(2);
-
-	return num;
+	WriteSignedNum(c);
+	return 0;
 }
