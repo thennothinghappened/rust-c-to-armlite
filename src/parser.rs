@@ -84,23 +84,27 @@ impl<'a> Parser<'a> {
             // Parse args.
             let args = self.parse_func_decl_args()?;
 
-            // May or may not have function body.
-            let body = if self.lexer.next_is(TokenKind::OpenCurly) {
-                Some(self.parse_block()?)
-            } else {
-                self.lexer.expect(TokenKind::Semicolon)?;
-                None
-            };
-
-            let func = CFunc {
+            let mut func = CFunc {
                 sig_id: self.program.func_type(CFuncType {
                     args,
                     returns: return_ctype,
                 }),
-                body,
+                body: None,
             };
 
-            self.program.declare_function(name, func);
+            // Pre-declare the function w/o body, so it is available for recursion.
+            self.program
+                .declare_function(name.clone(), func.clone())
+                .unwrap();
+
+            // May or may not have function body.
+            if self.lexer.next_is(TokenKind::OpenCurly) {
+                func.body = Some(self.parse_block()?);
+                self.program.declare_function(name, func).unwrap();
+            } else {
+                self.lexer.expect(TokenKind::Semicolon)?;
+            };
+
             return Ok(None);
         }
 
