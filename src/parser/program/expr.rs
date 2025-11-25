@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::parser::program::{expr::call::Call, types::Type};
+use crate::parser::program::{expr::call::Call, types::CType};
 
 pub mod call;
 
@@ -12,7 +12,7 @@ pub enum Expr {
     Call(Call),
     BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
     UnaryOp(UnaryOp, Box<Expr>),
-    Cast(Box<Expr>, Type),
+    Cast(Box<Expr>, CType),
 }
 
 pub trait BindingPower {

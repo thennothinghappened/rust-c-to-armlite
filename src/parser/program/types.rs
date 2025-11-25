@@ -1,38 +1,32 @@
-use crate::parser::program::{
-    statement::{Block, Statement},
-    TypeId,
+use crate::{
+    id_type,
+    parser::program::statement::{Block, Statement},
 };
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Type {
-    Inline(TypeInfo),
-    WithId(TypeId),
+id_type!(CTypeId);
+id_type!(CStructId);
+id_type!(CEnumId);
+id_type!(CFuncTypeId);
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CType {
+    AsIs(CConcreteType),
+    PointerTo(CTypeId),
+    ArrayOf(CTypeId, u32),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum TypeInfo {
-    Pointer(Box<Type>),
-    Array(Box<Type>, u32),
-    BuiltIn(BuiltInType),
-    Struct(Struct),
-    Enum(Enum),
-    Const(Box<Type>),
-}
-
-impl From<TypeInfo> for Type {
-    fn from(value: TypeInfo) -> Self {
-        Self::Inline(value)
-    }
-}
-
-impl From<TypeId> for Type {
-    fn from(value: TypeId) -> Self {
-        Self::WithId(value)
-    }
+/// A "final" type, which represents a built-in numeric type, struct, or enum. The latter two may be
+/// fetched using their specified ID.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CConcreteType {
+    Struct(CStructId),
+    Enum(CEnumId),
+    Func(CFuncTypeId),
+    Builtin(CTypeBuiltin),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BuiltInType {
+pub enum CTypeBuiltin {
     Void,
     Bool,
     Char,
@@ -51,19 +45,7 @@ pub enum BuiltInType {
     LongDouble,
 }
 
-impl From<BuiltInType> for TypeInfo {
-    fn from(value: BuiltInType) -> Self {
-        Self::BuiltIn(value)
-    }
-}
-
-impl From<BuiltInType> for Type {
-    fn from(value: BuiltInType) -> Self {
-        Self::Inline(value.into())
-    }
-}
-
-impl BuiltInType {
+impl CTypeBuiltin {
     /// Convert this type to an unsigned version, if one exists.
     pub fn unsigned(self) -> Option<Self> {
         match self {
@@ -89,45 +71,68 @@ impl BuiltInType {
     }
 }
 
+impl From<CTypeBuiltin> for CConcreteType {
+    fn from(value: CTypeBuiltin) -> Self {
+        Self::Builtin(value)
+    }
+}
+
+impl From<CStructId> for CConcreteType {
+    fn from(value: CStructId) -> Self {
+        Self::Struct(value)
+    }
+}
+
+impl From<CEnumId> for CConcreteType {
+    fn from(value: CEnumId) -> Self {
+        Self::Enum(value)
+    }
+}
+
+impl From<CFuncTypeId> for CConcreteType {
+    fn from(value: CFuncTypeId) -> Self {
+        Self::Func(value)
+    }
+}
+
+impl From<CConcreteType> for CType {
+    fn from(value: CConcreteType) -> Self {
+        Self::AsIs(value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct Function {
+pub struct CFuncType {
     pub args: Vec<Member>,
-    pub return_type: Box<Type>,
+    pub returns: CType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CFunc {
+    pub sig_id: CFuncTypeId,
     pub body: Option<Block>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Struct {
+pub struct CStruct {
     pub members: Option<Vec<Member>>,
 }
 
-impl Struct {
+impl CStruct {
     pub fn opaque() -> Self {
         Self { members: None }
-    }
-}
-
-impl From<Struct> for TypeInfo {
-    fn from(value: Struct) -> Self {
-        TypeInfo::Struct(value)
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Member {
     pub name: Option<String>,
-    pub type_info: Type,
+    pub ctype: CType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Enum {
+pub struct CEnum {
     pub entries: Vec<EnumMember>,
-}
-
-impl From<Enum> for TypeInfo {
-    fn from(value: Enum) -> Self {
-        TypeInfo::Enum(value)
-    }
 }
 
 pub type EnumMember = (String, i32);
@@ -136,5 +141,5 @@ pub type EnumMember = (String, i32);
 #[derive(Debug)]
 pub struct TypeDef {
     pub name: String,
-    pub target_type: Type,
+    pub ctype: CType,
 }

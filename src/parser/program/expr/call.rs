@@ -1,9 +1,13 @@
-use std::fmt::Display;
+use std::{fmt::Display, rc::Rc};
 
-use crate::parser::program::expr::Expr;
+use crate::parser::program::{
+    expr::Expr,
+    types::{CFunc, CFuncType, CFuncTypeId},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Call {
+    pub sig_id: CFuncTypeId,
     pub target: Box<Expr>,
     pub args: Vec<Expr>,
 }

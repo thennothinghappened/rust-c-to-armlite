@@ -1,4 +1,4 @@
-use crate::parser::program::{expr::Expr, types::Type};
+use crate::parser::program::{expr::Expr, types::CType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -32,6 +32,6 @@ impl From<Block> for Statement {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     pub name: String,
-    pub var_type: Type,
+    pub ctype: CType,
     pub value: Option<Expr>,
 }

@@ -14,6 +14,10 @@ use crate::{lexer::Lexer, parser::Parser};
 
 mod codegen;
 mod context;
+
+#[macro_use]
+mod id_type;
+
 mod lexer;
 mod parser;
 mod span;

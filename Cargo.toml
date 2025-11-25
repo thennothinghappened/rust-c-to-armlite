@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.100"
 codespan-reporting = "0.12.0"
 itertools = "0.14.0"
 phf = { version = "0.13.1", features = ["macros"] }

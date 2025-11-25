@@ -2,16 +2,10 @@
 #include "armlite.h"
 
 int main() {
-	int a = 2;
-	int b = 3;
-	int c = 0;
+	int c = 1 + 2;
 
-	if (a < b) {
-		c = a;
-	} else {
-		c = b;
-	}
+	WriteString("The number is:");
+	WriteSignedNum(555);
 
-	WriteSignedNum(c);
-	return 0;
+	return 5;
 }

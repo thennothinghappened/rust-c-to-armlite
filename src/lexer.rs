@@ -37,7 +37,7 @@ pub struct Lexer<'a> {
     pub index: usize,
     chars: Chars<'a>,
     token_buffer_stream: VecDeque<Token>,
-    context: Rc<Context>,
+    pub context: Rc<Context>,
     if_stack_depth: usize,
 }
 
