@@ -56,10 +56,11 @@ const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
 "#;
 
 static BUILTIN_FUNCS: phf::Map<&str, &str> = phf_map! {
-    "WriteString" => "\tPOP {R0}\n\tSTR R0, .WriteString\n\tRET",
-    "WriteSignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteSignedNum\n\tRET",
-    "WriteUnsignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteUnsignedNum\n\tRET",
-    "ReadString" => "\tPOP {R0}\n\tSTR R0, .ReadString\n\tRET",
+    "WriteString" => "\tPOP {R0}\n\tSTR R0, .WriteString\n\tRET\n",
+    "WriteSignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteSignedNum\n\tRET\n",
+    "WriteUnsignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteUnsignedNum\n\tRET\n",
+    "ReadString" => "\tPOP {R0}\n\tSTR R0, .ReadString\n\tRET\n",
+    "add" => "\tPOP {R0, R1}\n\tADD R0, R0, R1\n\tRET\n"
 };
 
 pub struct Generator {
@@ -281,13 +282,13 @@ impl Generator {
                 args,
                 sig_id,
             }) => {
+                let sig = self.program.get_func_type_by_id(*sig_id);
+
                 // push args to stack first. caller pushes args, callee expected to pop em. args
                 // pushed last first, so top of stack is the first argument.
                 let initial_frame_top = scope.stack_top_pos;
 
-                let arg_target_spots = self
-                    .program
-                    .get_func_type_by_id(*sig_id)
+                let arg_target_spots = sig
                     .args
                     .iter()
                     .rev()
@@ -336,6 +337,16 @@ impl Generator {
 
                 for (spot, _) in arg_target_spots {
                     scope.forget(spot);
+                }
+
+                let Some((out_pos, out_ctype)) = result_info else {
+                    return out;
+                };
+
+                if self.sizeof_type_in_bytes(&sig.returns) <= Self::WORD_SIZE.into() {
+                    out += &format!("\tSTR R0, [R11-#{out_pos}]\n");
+                } else {
+                    todo!("handle large (>1 register) return types")
                 }
             }
 
