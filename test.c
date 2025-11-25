@@ -5,7 +5,7 @@ int main() {
 	int c = 1 + 2;
 
 	WriteString("The number is:");
-	WriteSignedNum(555);
+	WriteSignedNum(add(1, 2));
 
 	return 5;
 }

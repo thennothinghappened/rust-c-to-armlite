@@ -7,4 +7,6 @@ void WriteSignedNum(int num);
 void WriteUnsignedNum(unsigned int num);
 void ReadString(char* outputString);
 
+int add(int a, int b);
+
 #endif
