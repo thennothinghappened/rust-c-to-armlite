@@ -309,11 +309,11 @@ impl Generator {
                 let new_frame_top = scope.stack_top_pos;
                 let stack_pointer_adjustment = new_frame_top - initial_frame_top;
 
+                out += &format!("\tSUB SP, SP, #{stack_pointer_adjustment}\t\t\t; Adjust SP to point at 1st call argument!\n");
+
                 for (arg, out_info) in args.iter().zip(&arg_target_spots) {
                     out += &self.generate_expr(scope, arg, Some(*out_info));
                 }
-
-                out += &format!("\tSUB SP, SP, #{stack_pointer_adjustment}\t\t\t; Adjust SP to point at 1st call argument!\n");
 
                 match &**target {
                     Expr::Reference(name) => {
