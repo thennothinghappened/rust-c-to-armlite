@@ -10,5 +10,20 @@
         "*.armlite": "arm",
         "random": "c",
         "test.h": "c"
-    }
+    },
+    "cSpell.words": [
+        "cfunc",
+        "charreading",
+        "codegen",
+        "Color",
+        "cstruct",
+        "ctype",
+        "ctypes",
+        "idents",
+        "lexers",
+        "preproc",
+        "termcolor",
+        "thiserror",
+        "tokenkind"
+    ]
 }

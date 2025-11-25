@@ -62,7 +62,7 @@ impl Program {
             *self
                 .ctypes
                 .get(self.ctypes_by_name.get(name)?)
-                .expect("typedef names->ids shouldn't desync with ids->types!!"),
+                .expect("typedef names->ids shouldn't de-sync with ids->types!!"),
         )
     }
 
@@ -74,7 +74,7 @@ impl Program {
         let Some((existing_id, existing_struct)) = self
             .structs_by_name
             .get(&name)
-            .and_then(|&id| Some((id, self.get_struct_by_id(id))))
+            .map(|&id| (id, self.get_struct_by_id(id)))
         else {
             let id = self.next_struct_id.get_and_increment();
 
@@ -87,7 +87,7 @@ impl Program {
         if *existing_struct != cstruct {
             if existing_struct.members.is_none() {
                 // We're giving a concrete definition to an existing opaque struct.
-                self.structs.insert(existing_id, cstruct.into());
+                self.structs.insert(existing_id, cstruct);
 
                 return Ok(existing_id);
             }
@@ -158,7 +158,7 @@ impl Program {
         let id = self.next_func_type_id.get_and_increment();
         self.func_types.insert(id, cfunc_type);
 
-        return id;
+        id
     }
 
     /// Define a new type upon encountering it. However, if this type has already been seen, the old

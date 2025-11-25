@@ -349,7 +349,7 @@ impl<'a> Lexer<'a> {
             self.if_stack_depth += 1;
         } else {
             // FIXME: this is a very bad way of doing this because strings n stuff could cause
-            // issues. lets pretend those dont exist for now :P
+            // issues. lets pretend those don't exist for now :P
             let mut if_stack_depth = 1;
 
             while if_stack_depth > 0 {

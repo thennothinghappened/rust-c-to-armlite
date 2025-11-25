@@ -50,7 +50,7 @@ pub(crate) enum TokenKind {
     Unknown(char),
     Eof,
 
-    /// Not a real source-code token! This will never be seen by the parser, and is an indiciation
+    /// Not a real source-code token! This will never be seen by the parser, and is an indication
     /// inside the lexer regarding what's going on.
     MacroExpansionMarker,
 }
