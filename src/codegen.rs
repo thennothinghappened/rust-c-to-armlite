@@ -90,10 +90,7 @@ impl Generator {
         output += "\n.DATA\n";
 
         for (name, value) in self.constant_strings.into_inner() {
-            output += &format!(
-                "{name}: .ASCIZ \"{}\"\n",
-                Self::escape_string_literal(&value)
-            );
+            output += &format!("{name}: .ASCIZ \"{value}\"\n",);
         }
 
         output
@@ -447,10 +444,6 @@ impl Generator {
 
     fn name_of_constant(&self, name: &str) -> String {
         format!("const_{name}")
-    }
-
-    fn escape_string_literal(string: &str) -> String {
-        string.replace("\"", "\\\"")
     }
 
     fn next_anon_id(&self) -> String {
