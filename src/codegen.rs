@@ -99,6 +99,10 @@ impl Generator {
             output += &format!("var_{name}: .BLOCK {}", self.sizeof_ctype(*ctype));
         }
 
+        if !output.ends_with('\n') {
+            output += "\n";
+        }
+
         output
     }
 
