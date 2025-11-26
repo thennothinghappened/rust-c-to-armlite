@@ -89,11 +89,11 @@ impl Generator {
             output += &self.generate_func(name, func);
         }
 
-        output += "\n.DATA\n";
-
         for (name, value) in self.constant_strings.borrow().iter() {
             output += &format!("{name}: .ASCIZ \"{value}\"\n",);
         }
+
+        output += "\n.DATA\n";
 
         for (name, (ctype, value)) in self.program.get_global_vars() {
             output += &format!("var_{name}: .BLOCK {}", self.sizeof_ctype(*ctype));
