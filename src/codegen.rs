@@ -91,8 +91,12 @@ impl Generator {
 
         output += "\n.DATA\n";
 
-        for (name, value) in self.constant_strings.into_inner() {
+        for (name, value) in self.constant_strings.borrow().iter() {
             output += &format!("{name}: .ASCIZ \"{value}\"\n",);
+        }
+
+        for (name, (ctype, value)) in self.program.get_global_vars() {
+            output += &format!("var_{name}: .BLOCK {}", self.sizeof_ctype(*ctype));
         }
 
         output
@@ -384,9 +388,51 @@ impl Generator {
                             out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
                         }
 
-                        Symbol::Var(ctype, expr) => {
-                            out += &format!("\tMOV R0, #var_{name}\n");
-                            out += "\tLDR R0, [R0]\n";
+                        Symbol::Var(var_ctype, _) => {
+                            match var_ctype {
+                                // FIXME FIXME FIXME: This is a copy-pasted impl of the above with
+                                // tiny changes. Really, we need a unified `Assign` implementation
+                                // which can go between *any* storage source and destinations, with
+                                // *any* types, and use it instead rather than bespoke solutions
+                                // everywhere for every single operation.
+                                CType::AsIs(cconcrete_type) => {
+                                    out += &format!("\tLDR R0, #var_{name}\n");
+                                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                }
+
+                                CType::PointerTo(ctype_id) => match ctype {
+                                    CType::AsIs(cconcrete_type) => {
+                                        panic!("can't cast a pointer to a value type")
+                                    }
+
+                                    CType::PointerTo(ctype_id) => {
+                                        out += &format!("\tLDR R0, #var_{name}\n");
+                                        out +=
+                                            &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                    }
+
+                                    CType::ArrayOf(ctype_id, size) => {
+                                        todo!("load array from pointer")
+                                    }
+                                },
+
+                                CType::ArrayOf(ctype_id, _) => match ctype {
+                                    CType::AsIs(cconcrete_type) => {
+                                        panic!("can't cast an array to a value type")
+                                    }
+
+                                    CType::PointerTo(ctype_id) => {
+                                        out += &format!("\tMOV R0, #var_{name}\n");
+                                        out +=
+                                            &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                    }
+
+                                    CType::ArrayOf(ctype_id, _) => {
+                                        todo!("array copying!")
+                                    }
+                                },
+                            }
+
                             out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
                         }
                     };

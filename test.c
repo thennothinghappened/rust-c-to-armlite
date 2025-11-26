@@ -1,8 +1,9 @@
 
 #include "armlite.h"
 
+char name[128];
+
 int main() {
-	char name[128];
 	char *string = "stuff";
 
 	WriteString(string);
