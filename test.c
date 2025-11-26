@@ -10,4 +10,9 @@ int main() {
 	WriteString("\nHello, ");
 	WriteString(name);
 	WriteString("!\n");
+
+	WriteString("Interpreting name as number:");
+	WriteSignedNum(name[0]);
+
+	return 1;
 }

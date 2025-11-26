@@ -33,7 +33,7 @@ pub enum BinaryOp {
 
     Plus,
 
-    ArraySubscript,
+    ArrayIndex,
 }
 
 impl BindingPower for BinaryOp {
@@ -45,7 +45,7 @@ impl BindingPower for BinaryOp {
             BinaryOp::BooleanEqual => 7,
             BinaryOp::LessThan => 8,
             BinaryOp::Plus => 13,
-            BinaryOp::ArraySubscript => 14,
+            BinaryOp::ArrayIndex => 14,
         }
     }
 }
@@ -97,7 +97,7 @@ impl Display for Expr {
                 BinaryOp::BooleanEqual => write!(f, "{lhs} == {rhs}"),
                 BinaryOp::LessThan => write!(f, "{lhs} < {rhs}"),
                 BinaryOp::Plus => write!(f, "{lhs} + {rhs}"),
-                BinaryOp::ArraySubscript => write!(f, "{lhs}[{rhs}]"),
+                BinaryOp::ArrayIndex => write!(f, "{lhs}[{rhs}]"),
             },
 
             Expr::Cast(expr, type_id) => write!(f, "({type_id:?}){expr}"),

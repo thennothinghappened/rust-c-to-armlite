@@ -1,19 +1,27 @@
-use std::{collections::HashMap, error::Error, fmt::Display};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    error::Error,
+    fmt::Display,
+};
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use thiserror::Error;
 
-use crate::parser::{
-    program::{
-        expr::Expr,
-        statement::{Block, Variable},
-        types::{
-            CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CStruct, CStructId,
-            CType, CTypeId, Member, TypeDef,
+use crate::{
+    id_type::GetAndIncrement,
+    parser::{
+        program::{
+            expr::Expr,
+            statement::{Block, Variable},
+            types::{
+                CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CStruct, CStructId,
+                CType, CTypeId, Member, TypeDef,
+            },
         },
+        TodoType,
     },
-    TodoType,
 };
 
 pub mod expr;
@@ -42,15 +50,15 @@ pub struct Program {
     next_func_type_id: CFuncTypeId,
 
     ctypes_by_name: HashMap<String, CTypeId>,
-    ctypes: HashMap<CTypeId, CType>,
-    next_ctype_id: CTypeId,
+    ctypes: RefCell<HashMap<CTypeId, CType>>,
+    next_ctype_id: Cell<CTypeId>,
 }
 
 impl Program {
     /// Declare that the given type name refers to a specific type, whether declared inline, or an
     /// known existing type.
     pub fn typedef(&mut self, typedef: TypeDef) -> Result<(), anyhow::Error> {
-        let id = self.ctype_id(typedef.ctype);
+        let id = self.ctype_id_of(typedef.ctype);
         self.ctypes_by_name.insert(typedef.name, id);
 
         Ok(())
@@ -61,6 +69,7 @@ impl Program {
         Some(
             *self
                 .ctypes
+                .borrow()
                 .get(self.ctypes_by_name.get(name)?)
                 .expect("typedef names->ids shouldn't de-sync with ids->types!!"),
         )
@@ -129,10 +138,12 @@ impl Program {
         Ok(())
     }
 
-    pub fn get_ctype(&self, id: CTypeId) -> &CType {
+    pub fn get_ctype(&self, id: CTypeId) -> CType {
         self.ctypes
+            .borrow()
             .get(&id)
             .expect("Getting a CType by its ID should NEVER fail or we're out of sync")
+            .clone()
     }
 
     pub fn get_struct(&self, id: CStructId) -> &CStruct {
@@ -163,11 +174,11 @@ impl Program {
 
     /// Define a new type upon encountering it. However, if this type has already been seen, the old
     /// type ID is returned instead.
-    pub fn ctype_id(&mut self, ctype: impl Into<CType>) -> CTypeId {
+    pub fn ctype_id_of(&self, ctype: impl Into<CType>) -> CTypeId {
         let actual_ctype = ctype.into();
 
         // Slow? probably horrendously! but hey, make it work first :P
-        if let Some(existing_id) = self.ctypes.iter().find_map(|pair| {
+        if let Some(existing_id) = self.ctypes.borrow().iter().find_map(|pair| {
             if *pair.1 == actual_ctype {
                 Some(pair.0)
             } else {
@@ -177,10 +188,9 @@ impl Program {
             return *existing_id;
         }
 
-        let id = self.next_ctype_id;
-        self.next_ctype_id = self.next_ctype_id.next();
+        let id = self.next_ctype_id.get_and_increment();
+        self.ctypes.borrow_mut().insert(id, actual_ctype);
 
-        self.ctypes.insert(id, actual_ctype);
         id
     }
 

@@ -1,3 +1,7 @@
+pub trait GetAndIncrement<T> {
+    fn get_and_increment(&self) -> T;
+}
+
 macro_rules! id_type {
     ($name: ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,6 +23,15 @@ macro_rules! id_type {
         impl Default for $name {
             fn default() -> Self {
                 Self(0)
+            }
+        }
+
+        impl crate::id_type::GetAndIncrement<$name> for std::cell::Cell<$name> {
+            fn get_and_increment(&self) -> $name {
+                let current = self.get();
+                self.set(current.next());
+
+                current
             }
         }
     };

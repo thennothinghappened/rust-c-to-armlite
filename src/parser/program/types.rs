@@ -22,11 +22,11 @@ pub enum CConcreteType {
     Struct(CStructId),
     Enum(CEnumId),
     Func(CFuncTypeId),
-    Builtin(CTypeBuiltin),
+    Builtin(CBuiltinType),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CTypeBuiltin {
+pub enum CBuiltinType {
     Void,
     Bool,
     Char,
@@ -45,7 +45,7 @@ pub enum CTypeBuiltin {
     LongDouble,
 }
 
-impl CTypeBuiltin {
+impl CBuiltinType {
     /// Convert this type to an unsigned version, if one exists.
     pub fn unsigned(self) -> Option<Self> {
         match self {
@@ -71,8 +71,8 @@ impl CTypeBuiltin {
     }
 }
 
-impl From<CTypeBuiltin> for CConcreteType {
-    fn from(value: CTypeBuiltin) -> Self {
+impl From<CBuiltinType> for CConcreteType {
+    fn from(value: CBuiltinType) -> Self {
         Self::Builtin(value)
     }
 }

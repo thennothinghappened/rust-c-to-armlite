@@ -15,9 +15,9 @@ use crate::{
     context::Context,
     parser::{
         program::{
-            expr::{call::Call, BinaryOp, Expr},
+            expr::{call::Call, BinaryOp, Expr, UnaryOp},
             statement::{Block, Statement, Variable},
-            types::{CConcreteType, CFunc, CFuncType, CType, CTypeBuiltin},
+            types::{CBuiltinType, CConcreteType, CFunc, CFuncType, CType},
             Program, Symbol,
         },
         TodoType,
@@ -134,10 +134,10 @@ impl Generator {
         let body_content = self.generate_block(&mut scope, statements);
 
         output += "\n\t; # Named Stack Variables\n";
-        for (name, (offset, ctype)) in scope
+        for (name, StackLocal { offset, ctype }) in scope
             .named_vars
             .iter()
-            .sorted_by(|&a, &b| a.1 .0.cmp(&b.1 .0))
+            .sorted_by(|&a, &b| a.1.offset.cmp(&b.1.offset))
         {
             output += &format!("\t; - {ctype:?} {name}: {}\n", stack_offset(*offset));
         }
@@ -157,7 +157,7 @@ impl Generator {
                     .cfunc_type
                     .args
                     .iter()
-                    .map(|arg| self.sizeof_ctype(&arg.ctype))
+                    .map(|arg| self.sizeof_ctype(arg.ctype))
                     .sum::<u32>()
             );
         }
@@ -180,7 +180,7 @@ impl Generator {
                         out += &self.generate_expr(
                             scope,
                             expr,
-                            Some((variable_offset, &variable.ctype)),
+                            Some((variable_offset, variable.ctype)),
                         );
                     }
                 }
@@ -190,7 +190,7 @@ impl Generator {
                 }
 
                 Statement::Return(expr) => {
-                    let return_type_size = self.sizeof_ctype(&scope.cfunc_type.returns);
+                    let return_type_size = self.sizeof_ctype(scope.cfunc_type.returns);
                     let temp_storage = scope.allocate_anon(return_type_size);
 
                     out += "\t; <return>\n";
@@ -198,7 +198,7 @@ impl Generator {
                     out += &self.generate_expr(
                         scope,
                         expr,
-                        Some((temp_storage, &scope.cfunc_type.returns)),
+                        Some((temp_storage, scope.cfunc_type.returns)),
                     );
 
                     if return_type_size > Self::WORD_SIZE as u32 {
@@ -239,7 +239,7 @@ impl Generator {
         &self,
         scope: &mut GenScope,
         expr: &'a Expr,
-        result_info: Option<(i32, &'a CType)>,
+        result_info: Option<(i32, CType)>,
     ) -> String {
         let mut out = String::new();
 
@@ -277,12 +277,15 @@ impl Generator {
                     return out;
                 };
 
-                if let Some((source_offset, source_ctype)) = scope.get_localvar(name) {
-                    out += &format!("\t; === query localvar `{name}` ===\n");
+                if let Some(source) = scope.get_localvar(name) {
+                    out += &format!(
+                        "\t; === query localvar `{name}` ({:?}) as a {:?} ===\n",
+                        source.ctype, ctype
+                    );
 
-                    match source_ctype {
+                    match source.ctype {
                         CType::AsIs(cconcrete_type) => {
-                            out += &format!("\tLDR R0, {}\n", stack_offset(source_offset));
+                            out += &format!("\tLDR R0, {}\n", stack_offset(source.offset));
                             out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
                         }
 
@@ -292,7 +295,7 @@ impl Generator {
                             }
 
                             CType::PointerTo(ctype_id) => {
-                                out += &format!("\tLDR R0, {}\n", stack_offset(source_offset));
+                                out += &format!("\tLDR R0, {}\n", stack_offset(source.offset));
                                 out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
                             }
 
@@ -305,7 +308,7 @@ impl Generator {
                             }
 
                             CType::PointerTo(ctype_id) => {
-                                out += &format!("\tSUB R0, R11, #{source_offset}\n");
+                                out += &format!("\tSUB R0, R11, #{}\n", source.offset);
                                 out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
                             }
 
@@ -357,8 +360,8 @@ impl Generator {
                     .rev()
                     .map(|member| {
                         (
-                            scope.allocate_anon(self.sizeof_ctype(&member.ctype)),
-                            &member.ctype,
+                            scope.allocate_anon(self.sizeof_ctype(member.ctype)),
+                            member.ctype,
                         )
                     })
                     .collect_vec();
@@ -398,7 +401,7 @@ impl Generator {
                         out += &self.generate_expr(
                             scope,
                             expr,
-                            Some((temp_fn_ptr_var, &CType::AsIs(CConcreteType::Func(*sig_id)))),
+                            Some((temp_fn_ptr_var, CType::AsIs(CConcreteType::Func(*sig_id)))),
                         );
 
                         out += "\tMOV LR, PC\t\t; Manually set LR (TODO: shouldn't this be +4??)\n";
@@ -417,7 +420,7 @@ impl Generator {
                     return out;
                 };
 
-                if self.sizeof_ctype(&sig.returns) <= Self::WORD_SIZE.into() {
+                if self.sizeof_ctype(sig.returns) <= Self::WORD_SIZE.into() {
                     out += &format!("\tSTR R0, {}\n", stack_offset(out_pos));
                     out += &format!(
                         "\t; === END Call {target} => R0 => {} ===\n\n",
@@ -428,43 +431,138 @@ impl Generator {
                 }
             }
 
-            Expr::BinaryOp(op, left, right) => match op {
-                BinaryOp::AndThen => todo!(),
-                BinaryOp::Assign => todo!(),
-                BinaryOp::BooleanEqual => todo!(),
-                BinaryOp::LessThan => todo!(),
+            Expr::BinaryOp(op, left, right) => {
+                match op {
+                    BinaryOp::AndThen => todo!(),
+                    BinaryOp::Assign => todo!(),
+                    BinaryOp::BooleanEqual => todo!(),
+                    BinaryOp::LessThan => todo!(),
 
-                BinaryOp::Plus => {
-                    let Some((result_offset, ctype)) = result_info else {
-                        // pointless no-op.
-                        return out;
-                    };
+                    BinaryOp::Plus => {
+                        let Some((result_offset, ctype)) = result_info else {
+                            // pointless no-op.
+                            return out;
+                        };
 
-                    let ctype_size = self.sizeof_ctype(ctype);
+                        let ctype_size = self.sizeof_ctype(ctype);
 
-                    out += &format!("\n\t; === binop({left} + {right}) ===\n");
-                    out += &format!("\tSUB SP, SP, #{}\n", ctype_size * 2);
+                        out += &format!("\n\t; === binop({left} + {right}) ===\n");
+                        out += &format!("\tSUB SP, SP, #{}\n", ctype_size * 2);
 
-                    let left_temp = scope.allocate_anon(ctype_size);
-                    let right_temp = scope.allocate_anon(ctype_size);
+                        let left_temp = scope.allocate_anon(ctype_size);
+                        let right_temp = scope.allocate_anon(ctype_size);
 
-                    out += &self.generate_expr(scope, left, Some((left_temp, ctype)));
-                    out += &self.generate_expr(scope, right, Some((right_temp, ctype)));
-                    out += &format!("\tLDR R0, {}\n", stack_offset(left_temp));
-                    out += &format!("\tLDR R1, {}\n", stack_offset(right_temp));
+                        out += &self.generate_expr(scope, left, Some((left_temp, ctype)));
+                        out += &self.generate_expr(scope, right, Some((right_temp, ctype)));
+                        out += &format!("\tLDR R0, {}\n", stack_offset(left_temp));
+                        out += &format!("\tLDR R1, {}\n", stack_offset(right_temp));
 
-                    scope.forget(left_temp);
-                    scope.forget(right_temp);
+                        scope.forget(left_temp);
+                        scope.forget(right_temp);
 
-                    out += &format!("\tADD SP, SP, #{}\n", ctype_size * 2);
+                        out += &format!("\tADD SP, SP, #{}\n", ctype_size * 2);
 
-                    out += "\tADD R0, R0, R1\n";
-                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
-                    out += &format!("\t; === END binop({left} + {right}) ===\n\n");
+                        out += "\tADD R0, R0, R1\n";
+                        out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                        out += &format!("\t; === END binop({left} + {right}) ===\n\n");
+                    }
+
+                    BinaryOp::ArrayIndex => {
+                        let Some((result_offset, ctype)) = result_info else {
+                            // pointless no-op.
+                            return out;
+                        };
+
+                        let element_ctype = scope.type_of_expr(expr);
+                        let element_size = self.sizeof_ctype(element_ctype);
+
+                        let temp_index_storage = scope.allocate_anon(Self::WORD_SIZE as u32);
+                        let temp_ptr_storage = scope.allocate_anon(Self::WORD_SIZE as u32);
+
+                        out += &self.generate_expr(
+                            scope,
+                            right,
+                            Some((
+                                temp_index_storage,
+                                CType::AsIs(CConcreteType::Builtin(CBuiltinType::Int)),
+                            )),
+                        );
+
+                        out += &self.generate_expr(
+                            scope,
+                            left,
+                            Some((
+                                temp_ptr_storage,
+                                CType::PointerTo(
+                                    self.program
+                                        .ctype_id_of(CConcreteType::Builtin(CBuiltinType::Void)),
+                                ),
+                            )),
+                        );
+
+                        let result_size = self.sizeof_ctype(ctype);
+
+                        match element_size {
+                            1 => {
+                                out += &format!("\tLDR R0, {}\n", stack_offset(temp_ptr_storage));
+                                out += &format!("\tLDR R1, {}\n", stack_offset(temp_index_storage));
+                                out += "\tLDRB R0, [R0+R1]\n";
+
+                                if result_size == 1 {
+                                    out += &format!("\tSTRB R0, {}\n", stack_offset(result_offset));
+                                } else {
+                                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                }
+                            }
+
+                            2 => {
+                                // FIXME: I'm probably doing this big-endian by accident!!
+                                out += &format!("\tLDR R0, {}\n", stack_offset(temp_ptr_storage));
+                                out += &format!("\tLDR R1, {}\n", stack_offset(temp_index_storage));
+                                out += "\tLSL R2, R1, #1\n";
+                                out += "\tADD R2, R0, R2\n";
+                                out += "\tLDRB R0, [R2]\n";
+                                out += "\tLDRB R1, [R2+#1]\n";
+                                out += "\tLSL R0, R0, #8\n";
+                                out += "\tAND R0, R0, R1\n";
+                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                            }
+
+                            3 => {
+                                // FIXME: I'm probably doing this big-endian by accident!!
+                                out += &format!("\tLDR R0, {}\n", stack_offset(temp_ptr_storage));
+                                out += &format!("\tLDR R1, {}\n", stack_offset(temp_index_storage));
+                                out += "\tLSL R2, R1, #1\n";
+                                out += "\tADD R2, R2, R1\n";
+                                out += "\tADD R2, R0, R2\n";
+                                out += "\tLDRB R0, [R2]\n";
+                                out += "\tLDRB R1, [R2+#1]\n";
+                                out += "\tLSL R0, R0, #8\n";
+                                out += "\tAND R0, R0, R1\n";
+                                out += "\tLDRB R1, [R2+#2]\n";
+                                out += "\tLSL R0, R0, #8\n";
+                                out += "\tAND R0, R0, R1\n";
+                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                            }
+
+                            4 => {
+                                out += &format!("\tLDR R0, {}\n", stack_offset(temp_ptr_storage));
+                                out += &format!("\tLDR R1, {}\n", stack_offset(temp_index_storage));
+                                out += "\tLSL R1, R1, #2\n";
+                                out += "\tLDR R0, [R0+R1]\n";
+                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                            }
+
+                            _ => todo!(
+                                "{element_ctype:?} ({element_size} bytes) can't fit in a register"
+                            ),
+                        }
+
+                        scope.forget(temp_index_storage);
+                        scope.forget(temp_ptr_storage);
+                    }
                 }
-
-                BinaryOp::ArraySubscript => todo!(),
-            },
+            }
 
             Expr::UnaryOp(op, expr) => todo!(),
             Expr::Cast(expr, _) => todo!(),
@@ -492,14 +590,10 @@ impl Generator {
         id.to_string()
     }
 
-    fn type_of_expr(&self, expr: &Expr) -> CType {
-        todo!("determine the type of an expression")
-    }
-
     const WORD_SIZE: u16 = 4;
 
-    fn sizeof_ctype(&self, ctype: &CType) -> u32 {
-        if let Some(size) = self.ctype_size_cache.borrow().get(ctype) {
+    fn sizeof_ctype(&self, ctype: CType) -> u32 {
+        if let Some(size) = self.ctype_size_cache.borrow().get(&ctype) {
             return *size;
         }
 
@@ -507,19 +601,19 @@ impl Generator {
             CType::PointerTo(_) => Self::WORD_SIZE.into(),
 
             CType::ArrayOf(inner_id, element_count) => {
-                self.sizeof_ctype(self.program.get_ctype(*inner_id)) * element_count
+                self.sizeof_ctype(self.program.get_ctype(inner_id)) * element_count
             }
 
             CType::AsIs(concrete) => match concrete {
                 CConcreteType::Struct(cstruct_id) => self
                     .program
-                    .get_struct(*cstruct_id)
+                    .get_struct(cstruct_id)
                     .members
                     .as_ref()
                     .map(|members| {
                         members
                             .iter()
-                            .map(|member| self.sizeof_ctype(&member.ctype))
+                            .map(|member| self.sizeof_ctype(member.ctype))
                             .sum()
                     })
                     .unwrap_or(0),
@@ -528,27 +622,27 @@ impl Generator {
                 CConcreteType::Func(_) => Self::WORD_SIZE.into(),
 
                 CConcreteType::Builtin(builtin) => match builtin {
-                    CTypeBuiltin::Void => 0,
-                    CTypeBuiltin::Bool => 1,
-                    CTypeBuiltin::Char => 1,
-                    CTypeBuiltin::SignedChar => 1,
-                    CTypeBuiltin::UnsignedChar => 1,
-                    CTypeBuiltin::Short => 2,
-                    CTypeBuiltin::UnsignedShort => 2,
-                    CTypeBuiltin::Int => Self::WORD_SIZE.into(),
-                    CTypeBuiltin::UnsignedInt => Self::WORD_SIZE.into(),
-                    CTypeBuiltin::Long => Self::WORD_SIZE.into(),
-                    CTypeBuiltin::UnsignedLong => Self::WORD_SIZE.into(),
-                    CTypeBuiltin::LongLong => 8,
-                    CTypeBuiltin::UnsignedLongLong => 8,
-                    CTypeBuiltin::Float => 2,
-                    CTypeBuiltin::Double => 4,
-                    CTypeBuiltin::LongDouble => 4,
+                    CBuiltinType::Void => 0,
+                    CBuiltinType::Bool => 1,
+                    CBuiltinType::Char => 1,
+                    CBuiltinType::SignedChar => 1,
+                    CBuiltinType::UnsignedChar => 1,
+                    CBuiltinType::Short => 2,
+                    CBuiltinType::UnsignedShort => 2,
+                    CBuiltinType::Int => Self::WORD_SIZE.into(),
+                    CBuiltinType::UnsignedInt => Self::WORD_SIZE.into(),
+                    CBuiltinType::Long => Self::WORD_SIZE.into(),
+                    CBuiltinType::UnsignedLong => Self::WORD_SIZE.into(),
+                    CBuiltinType::LongLong => 8,
+                    CBuiltinType::UnsignedLongLong => 8,
+                    CBuiltinType::Float => 2,
+                    CBuiltinType::Double => 4,
+                    CBuiltinType::LongDouble => 4,
                 },
             },
         };
 
-        self.ctype_size_cache.borrow_mut().insert(*ctype, size);
+        self.ctype_size_cache.borrow_mut().insert(ctype, size);
         size
     }
 }
@@ -558,7 +652,7 @@ struct GenScope<'a> {
     cfunc_name: &'a str,
     cfunc_type: &'a CFuncType,
     stack_top_pos: i32,
-    named_vars: HashMap<String, (i32, CType)>,
+    named_vars: HashMap<String, StackLocal>,
     frame: Vec<(u32, bool)>,
 }
 
@@ -576,8 +670,8 @@ impl<'a> GenScope<'a> {
 
     /// Allocate space for a local variable, return its stack frame offset.
     pub fn allocate_var(&mut self, name: String, ctype: CType) -> i32 {
-        let offset = self.allocate_anon(self.generator.sizeof_ctype(&ctype));
-        self.named_vars.insert(name, (offset, ctype));
+        let offset = self.allocate_anon(self.generator.sizeof_ctype(ctype));
+        self.named_vars.insert(name, StackLocal { offset, ctype });
 
         offset
     }
@@ -635,7 +729,7 @@ impl<'a> GenScope<'a> {
     }
 
     /// Get the offset of a previously defined local variable, if it exists.
-    pub fn get_localvar(&self, name: &str) -> Option<(i32, CType)> {
+    pub fn get_localvar(&self, name: &str) -> Option<StackLocal> {
         if let Some(offset) = self.named_vars.get(name) {
             return Some(*offset);
         }
@@ -643,15 +737,91 @@ impl<'a> GenScope<'a> {
         let mut offset: i32 = -4;
 
         for arg in self.cfunc_type.args.iter() {
-            offset -= self.generator.sizeof_ctype(&arg.ctype) as i32;
+            offset -= self.generator.sizeof_ctype(arg.ctype) as i32;
 
             if arg.name.as_deref() == Some(name) {
-                return Some((offset, arg.ctype));
+                return Some(StackLocal {
+                    offset,
+                    ctype: arg.ctype,
+                });
             }
         }
 
         None
     }
+
+    fn type_of_expr(&self, expr: &Expr) -> CType {
+        match expr {
+            Expr::StringLiteral(_) => CType::PointerTo(
+                self.generator
+                    .program
+                    .ctype_id_of(CConcreteType::Builtin(CBuiltinType::Char)),
+            ),
+
+            Expr::IntLiteral(_) => CConcreteType::Builtin(CBuiltinType::Int).into(),
+
+            Expr::Reference(name) => {
+                if let Some(local) = self.get_localvar(name) {
+                    return local.ctype;
+                }
+
+                if let Some(symbol) = self.generator.program.get_symbol(name) {
+                    return match symbol {
+                        Symbol::Func(cfunc) => CType::AsIs(cfunc.sig_id.into()),
+                        Symbol::Var(ctype, _) => *ctype,
+                    };
+                }
+
+                panic!("Can't get the ctype of the undefined variable `{name}`")
+            }
+
+            Expr::Call(call) => CConcreteType::Func(call.sig_id).into(),
+
+            Expr::BinaryOp(op, left, right) => match op {
+                BinaryOp::AndThen => self.type_of_expr(&right),
+                BinaryOp::Assign => self.type_of_expr(&left),
+                BinaryOp::BooleanEqual => CType::AsIs(CBuiltinType::Bool.into()),
+                BinaryOp::LessThan => CType::AsIs(CBuiltinType::Bool.into()),
+                BinaryOp::Plus => todo!("numeric type implicit conversion rules"),
+
+                BinaryOp::ArrayIndex => match self.type_of_expr(&left) {
+                    CType::AsIs(_) => panic!("Can't index a concrete type as an array!"),
+                    CType::PointerTo(inner) | CType::ArrayOf(inner, _) => {
+                        self.generator.program.get_ctype(inner)
+                    }
+                },
+            },
+
+            Expr::UnaryOp(op, expr) => match op {
+                UnaryOp::IncrementThenGet => self.type_of_expr(expr),
+                UnaryOp::GetThenIncrement => self.type_of_expr(expr),
+                UnaryOp::DecrementThenGet => self.type_of_expr(expr),
+                UnaryOp::GetThenDecrement => self.type_of_expr(expr),
+                UnaryOp::SizeOf => CType::AsIs(CBuiltinType::Int.into()),
+                UnaryOp::BooleanNot => CType::AsIs(CBuiltinType::Bool.into()),
+                UnaryOp::Negative => self.type_of_expr(expr),
+
+                UnaryOp::AddressOf => {
+                    CType::PointerTo(self.generator.program.ctype_id_of(self.type_of_expr(expr)))
+                }
+
+                UnaryOp::Dereference => match self.type_of_expr(expr) {
+                    CType::AsIs(_) => panic!("Can't dereference a concrete type!"),
+                    CType::PointerTo(inner) | CType::ArrayOf(inner, _) => {
+                        self.generator.program.get_ctype(inner)
+                    }
+                },
+            },
+
+            Expr::Cast(expr, ctype) => *ctype,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StackLocal {
+    offset: i32,
+    ctype: CType,
 }
 
 fn stack_offset(offset: i32) -> String {
@@ -660,26 +830,4 @@ fn stack_offset(offset: i32) -> String {
         if offset >= 0 { '-' } else { '+' },
         offset.abs()
     )
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Reg {
-    R0,
-    R1,
-    R2,
-    R3,
-    R4,
-    R5,
-    R6,
-    R7,
-    R8,
-    R9,
-    R10,
-    R12,
-    R13,
-    R14,
-    R15,
-    FramePtr,
-    StackPtr,
-    InstPtr,
 }

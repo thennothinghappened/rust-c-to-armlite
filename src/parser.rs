@@ -5,7 +5,7 @@ use crate::{
     parser::program::{
         expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
         statement::{Block, Statement, Variable},
-        types::{CConcreteType, CFunc, CFuncType, CStruct, CType, CTypeBuiltin, Member, TypeDef},
+        types::{CBuiltinType, CConcreteType, CFunc, CFuncType, CStruct, CType, Member, TypeDef},
         Program, StructBuilder,
     },
     span::Span,
@@ -135,7 +135,7 @@ impl<'a> Parser<'a> {
 
                 this_type = CType::AsIs(CConcreteType::Func(self.program.func_type(CFuncType {
                     args,
-                    returns: *self.program.get_ctype(return_ctype_id),
+                    returns: self.program.get_ctype(return_ctype_id),
                 })));
             }
 
@@ -161,7 +161,7 @@ impl<'a> Parser<'a> {
             self.lexer.expect(TokenKind::CloseSquare)?;
 
             this_type = CType::ArrayOf(
-                self.program.ctype_id(this_type),
+                self.program.ctype_id_of(this_type),
                 element_count
                     .try_into()
                     .expect("must be a positive array size"),
@@ -176,7 +176,7 @@ impl<'a> Parser<'a> {
 
         // Evil right-associative pointer syntax >:(((
         while self.lexer.accept(TokenKind::Star) {
-            this_type = CType::PointerTo(self.program.ctype_id(this_type)).into();
+            this_type = CType::PointerTo(self.program.ctype_id_of(this_type)).into();
         }
 
         Ok(this_type)
@@ -426,7 +426,7 @@ impl<'a> Parser<'a> {
 
             if self.lexer.accept(TokenKind::OpenSquare) {
                 operand = Expr::BinaryOp(
-                    BinaryOp::ArraySubscript,
+                    BinaryOp::ArrayIndex,
                     Box::new(operand),
                     Box::new(self.parse_expr(0)?),
                 );
@@ -575,7 +575,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_numeric_type(&mut self) -> Result<CTypeBuiltin, ParseError> {
+    fn parse_numeric_type(&mut self) -> Result<CBuiltinType, ParseError> {
         if self.lexer.accept(TokenKind::Unsigned) {
             return self
                 .parse_terminal_numeric_type()?
@@ -593,14 +593,14 @@ impl<'a> Parser<'a> {
         self.parse_terminal_numeric_type()
     }
 
-    fn parse_terminal_numeric_type(&mut self) -> Result<CTypeBuiltin, ParseError> {
+    fn parse_terminal_numeric_type(&mut self) -> Result<CBuiltinType, ParseError> {
         if let Some(basic_type) = self.lexer.maybe_map_next(|token| match token {
-            TokenKind::Void => Some(CTypeBuiltin::Void),
-            TokenKind::Bool => Some(CTypeBuiltin::Bool),
-            TokenKind::Int => Some(CTypeBuiltin::Int),
-            TokenKind::Char => Some(CTypeBuiltin::Char),
-            TokenKind::Float => Some(CTypeBuiltin::Float),
-            TokenKind::Double => Some(CTypeBuiltin::Double),
+            TokenKind::Void => Some(CBuiltinType::Void),
+            TokenKind::Bool => Some(CBuiltinType::Bool),
+            TokenKind::Int => Some(CBuiltinType::Int),
+            TokenKind::Char => Some(CBuiltinType::Char),
+            TokenKind::Float => Some(CBuiltinType::Float),
+            TokenKind::Double => Some(CBuiltinType::Double),
             _ => None,
         }) {
             return Ok(basic_type);
@@ -608,10 +608,10 @@ impl<'a> Parser<'a> {
 
         if self.lexer.accept(TokenKind::Short) {
             if self.lexer.accept(TokenKind::Int) {
-                return Ok(CTypeBuiltin::Short);
+                return Ok(CBuiltinType::Short);
             }
 
-            return Ok(CTypeBuiltin::Short);
+            return Ok(CBuiltinType::Short);
         }
 
         if self.lexer.accept(TokenKind::Long) {
@@ -620,17 +620,17 @@ impl<'a> Parser<'a> {
                 // (optional "int" suffix here)
                 self.lexer.accept(TokenKind::Int);
 
-                return Ok(CTypeBuiltin::LongLong);
+                return Ok(CBuiltinType::LongLong);
             }
 
             if self.lexer.accept(TokenKind::Double) {
-                return Ok(CTypeBuiltin::LongDouble);
+                return Ok(CBuiltinType::LongDouble);
             }
 
             // again, optional "int".
             self.lexer.accept(TokenKind::Int);
 
-            return Ok(CTypeBuiltin::Long);
+            return Ok(CBuiltinType::Long);
         }
 
         Err(self.unexpected_token())
@@ -704,15 +704,15 @@ impl<'a> Parser<'a> {
                 BinaryOp::AndThen | BinaryOp::Assign => self.resolve_ctype(right),
 
                 BinaryOp::BooleanEqual | BinaryOp::LessThan => {
-                    Ok(CType::AsIs(CTypeBuiltin::Bool.into()))
+                    Ok(CType::AsIs(CBuiltinType::Bool.into()))
                 }
 
                 BinaryOp::Plus => self.resolve_ctype(left),
 
-                BinaryOp::ArraySubscript => match self.resolve_ctype(left)? {
-                    CType::PointerTo(element_ctype) => Ok(*self.program.get_ctype(element_ctype)),
+                BinaryOp::ArrayIndex => match self.resolve_ctype(left)? {
+                    CType::PointerTo(element_ctype) => Ok(self.program.get_ctype(element_ctype)),
 
-                    CType::ArrayOf(element_ctype, _) => Ok(*self.program.get_ctype(element_ctype)),
+                    CType::ArrayOf(element_ctype, _) => Ok(self.program.get_ctype(element_ctype)),
 
                     ctype => self.error(format!("cant index non-array/ptr type {ctype:#?}")),
                 },
