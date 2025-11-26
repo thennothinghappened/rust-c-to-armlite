@@ -667,7 +667,7 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            Expr::Call(call) => Ok(self.program.get_func_type_by_id(call.sig_id).returns),
+            Expr::Call(call) => Ok(self.program.get_func_type(call.sig_id).returns),
 
             Expr::BinaryOp(op, left, right) => match op {
                 BinaryOp::AndThen | BinaryOp::Assign => self.resolve_ctype(right),
@@ -679,13 +679,9 @@ impl<'a> Parser<'a> {
                 BinaryOp::Plus => self.resolve_ctype(left),
 
                 BinaryOp::ArraySubscript => match self.resolve_ctype(left)? {
-                    CType::PointerTo(element_ctype) => {
-                        Ok(*self.program.get_ctype_by_id(element_ctype))
-                    }
+                    CType::PointerTo(element_ctype) => Ok(*self.program.get_ctype(element_ctype)),
 
-                    CType::ArrayOf(element_ctype, _) => {
-                        Ok(*self.program.get_ctype_by_id(element_ctype))
-                    }
+                    CType::ArrayOf(element_ctype, _) => Ok(*self.program.get_ctype(element_ctype)),
 
                     ctype => self.error(format!("cant index non-array/ptr type {ctype:#?}")),
                 },

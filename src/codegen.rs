@@ -67,6 +67,7 @@ pub struct Generator {
     program: Program,
     constant_strings: RefCell<HashMap<String, String>>,
     next_anon_id: Cell<usize>,
+    ctype_size_cache: RefCell<HashMap<CType, u32>>,
 }
 
 impl Generator {
@@ -75,6 +76,7 @@ impl Generator {
             program,
             next_anon_id: 0.into(),
             constant_strings: HashMap::default().into(),
+            ctype_size_cache: HashMap::default().into(),
         }
     }
 
@@ -101,7 +103,7 @@ impl Generator {
         let mut output = String::new();
         output += "\n";
 
-        let sig = self.program.get_func_type_by_id(func.sig_id);
+        let sig = self.program.get_func_type(func.sig_id);
 
         if !sig.args.is_empty() {
             output += "; # Arguments\n";
@@ -129,11 +131,7 @@ impl Generator {
         output += "\tPUSH {R11, LR}\n";
         output += "\tMOV R11, SP\n";
 
-        let mut scope = GenScope::new(
-            self,
-            func_name,
-            self.program.get_func_type_by_id(func.sig_id),
-        );
+        let mut scope = GenScope::new(self, func_name, self.program.get_func_type(func.sig_id));
 
         let body_content = self.generate_block(&mut scope, statements);
 
@@ -160,7 +158,7 @@ impl Generator {
         for statement in statements {
             match statement {
                 Statement::Declare(variable) => {
-                    let variable_size = self.sizeof_type_in_bytes(&variable.ctype);
+                    let variable_size = self.sizeof_ctype(&variable.ctype);
                     let variable_offset = scope.allocate_var(variable.name.clone(), variable_size);
 
                     if let Some(expr) = &variable.value {
@@ -178,7 +176,7 @@ impl Generator {
                 }
 
                 Statement::Return(expr) => {
-                    let return_type_size = self.sizeof_type_in_bytes(&scope.cfunc_type.returns);
+                    let return_type_size = self.sizeof_ctype(&scope.cfunc_type.returns);
                     let temp_storage = scope.allocate_anon(return_type_size);
 
                     out += "\t; <return>\n";
@@ -282,7 +280,7 @@ impl Generator {
                 args,
                 sig_id,
             }) => {
-                let sig = self.program.get_func_type_by_id(*sig_id);
+                let sig = self.program.get_func_type(*sig_id);
 
                 // push args to stack first. caller pushes args, callee expected to pop em. args
                 // pushed last first, so top of stack is the first argument.
@@ -294,7 +292,7 @@ impl Generator {
                     .rev()
                     .map(|member| {
                         (
-                            scope.allocate_anon(self.sizeof_type_in_bytes(&member.ctype)),
+                            scope.allocate_anon(self.sizeof_ctype(&member.ctype)),
                             &member.ctype,
                         )
                     })
@@ -343,7 +341,7 @@ impl Generator {
                     return out;
                 };
 
-                if self.sizeof_type_in_bytes(&sig.returns) <= Self::WORD_SIZE.into() {
+                if self.sizeof_ctype(&sig.returns) <= Self::WORD_SIZE.into() {
                     out += &format!("\tSTR R0, [R11-#{out_pos}]\n");
                 } else {
                     todo!("handle large (>1 register) return types")
@@ -405,51 +403,55 @@ impl Generator {
 
     const WORD_SIZE: u16 = 4;
 
-    fn sizeof_type_in_bytes(&self, ctype: &CType) -> u32 {
-        match ctype {
-            CType::PointerTo(_) => Self::WORD_SIZE.into(),
+    fn sizeof_ctype(&self, ctype: &CType) -> u32 {
+        *self
+            .ctype_size_cache
+            .borrow_mut()
+            .entry(*ctype)
+            .or_insert_with(|| match ctype {
+                CType::PointerTo(_) => Self::WORD_SIZE.into(),
 
-            CType::ArrayOf(inner_id, element_count) => {
-                self.sizeof_type_in_bytes(self.program.get_ctype_by_id(*inner_id)) * element_count
-            }
+                CType::ArrayOf(inner_id, element_count) => {
+                    self.sizeof_ctype(self.program.get_ctype(*inner_id)) * element_count
+                }
 
-            CType::AsIs(concrete) => match concrete {
-                CConcreteType::Struct(cstruct_id) => self
-                    .program
-                    .get_struct_by_id(*cstruct_id)
-                    .members
-                    .as_ref()
-                    .map(|members| {
-                        members
-                            .iter()
-                            .map(|member| self.sizeof_type_in_bytes(&member.ctype))
-                            .sum()
-                    })
-                    .unwrap_or(0),
+                CType::AsIs(concrete) => match concrete {
+                    CConcreteType::Struct(cstruct_id) => self
+                        .program
+                        .get_struct(*cstruct_id)
+                        .members
+                        .as_ref()
+                        .map(|members| {
+                            members
+                                .iter()
+                                .map(|member| self.sizeof_ctype(&member.ctype))
+                                .sum()
+                        })
+                        .unwrap_or(0),
 
-                CConcreteType::Enum(cenum_id) => Self::WORD_SIZE.into(),
-                CConcreteType::Func(_) => Self::WORD_SIZE.into(),
+                    CConcreteType::Enum(cenum_id) => Self::WORD_SIZE.into(),
+                    CConcreteType::Func(_) => Self::WORD_SIZE.into(),
 
-                CConcreteType::Builtin(builtin) => match builtin {
-                    CTypeBuiltin::Void => 0,
-                    CTypeBuiltin::Bool => 1,
-                    CTypeBuiltin::Char => 1,
-                    CTypeBuiltin::SignedChar => 1,
-                    CTypeBuiltin::UnsignedChar => 1,
-                    CTypeBuiltin::Short => 2,
-                    CTypeBuiltin::UnsignedShort => 2,
-                    CTypeBuiltin::Int => Self::WORD_SIZE.into(),
-                    CTypeBuiltin::UnsignedInt => Self::WORD_SIZE.into(),
-                    CTypeBuiltin::Long => Self::WORD_SIZE.into(),
-                    CTypeBuiltin::UnsignedLong => Self::WORD_SIZE.into(),
-                    CTypeBuiltin::LongLong => 8,
-                    CTypeBuiltin::UnsignedLongLong => 8,
-                    CTypeBuiltin::Float => 2,
-                    CTypeBuiltin::Double => 4,
-                    CTypeBuiltin::LongDouble => 4,
+                    CConcreteType::Builtin(builtin) => match builtin {
+                        CTypeBuiltin::Void => 0,
+                        CTypeBuiltin::Bool => 1,
+                        CTypeBuiltin::Char => 1,
+                        CTypeBuiltin::SignedChar => 1,
+                        CTypeBuiltin::UnsignedChar => 1,
+                        CTypeBuiltin::Short => 2,
+                        CTypeBuiltin::UnsignedShort => 2,
+                        CTypeBuiltin::Int => Self::WORD_SIZE.into(),
+                        CTypeBuiltin::UnsignedInt => Self::WORD_SIZE.into(),
+                        CTypeBuiltin::Long => Self::WORD_SIZE.into(),
+                        CTypeBuiltin::UnsignedLong => Self::WORD_SIZE.into(),
+                        CTypeBuiltin::LongLong => 8,
+                        CTypeBuiltin::UnsignedLongLong => 8,
+                        CTypeBuiltin::Float => 2,
+                        CTypeBuiltin::Double => 4,
+                        CTypeBuiltin::LongDouble => 4,
+                    },
                 },
-            },
-        }
+            })
     }
 }
 

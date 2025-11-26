@@ -8,7 +8,7 @@ id_type!(CStructId);
 id_type!(CEnumId);
 id_type!(CFuncTypeId);
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CType {
     AsIs(CConcreteType),
     PointerTo(CTypeId),
@@ -17,7 +17,7 @@ pub enum CType {
 
 /// A "final" type, which represents a built-in numeric type, struct, or enum. The latter two may be
 /// fetched using their specified ID.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CConcreteType {
     Struct(CStructId),
     Enum(CEnumId),
@@ -25,7 +25,7 @@ pub enum CConcreteType {
     Builtin(CTypeBuiltin),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CTypeBuiltin {
     Void,
     Bool,

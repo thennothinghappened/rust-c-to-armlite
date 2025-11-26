@@ -74,7 +74,7 @@ impl Program {
         let Some((existing_id, existing_struct)) = self
             .structs_by_name
             .get(&name)
-            .map(|&id| (id, self.get_struct_by_id(id)))
+            .map(|&id| (id, self.get_struct(id)))
         else {
             let id = self.next_struct_id.get_and_increment();
 
@@ -129,19 +129,19 @@ impl Program {
         Ok(())
     }
 
-    pub fn get_ctype_by_id(&self, id: CTypeId) -> &CType {
+    pub fn get_ctype(&self, id: CTypeId) -> &CType {
         self.ctypes
             .get(&id)
             .expect("Getting a CType by its ID should NEVER fail or we're out of sync")
     }
 
-    pub fn get_struct_by_id(&self, id: CStructId) -> &CStruct {
+    pub fn get_struct(&self, id: CStructId) -> &CStruct {
         self.structs
             .get(&id)
             .expect("Getting a CStruct by its ID should NEVER fail or we're out of sync")
     }
 
-    pub fn get_func_type_by_id(&self, id: CFuncTypeId) -> &CFuncType {
+    pub fn get_func_type(&self, id: CFuncTypeId) -> &CFuncType {
         self.func_types
             .get(&id)
             .expect("Getting a CFuncSig by its ID should NEVER fail or we're out of sync")
