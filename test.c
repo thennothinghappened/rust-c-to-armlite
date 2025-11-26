@@ -12,7 +12,7 @@ int main() {
 	WriteString("!\n");
 
 	WriteString("Interpreting name as number:");
-	WriteSignedNum(name[0]);
+	WriteChar(name[0]);
 
 	return 1;
 }

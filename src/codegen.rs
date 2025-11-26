@@ -56,6 +56,7 @@ const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
 "#;
 
 static BUILTIN_FUNCS: phf::Map<&str, &str> = phf_map! {
+    "WriteChar" => "\tPOP {R0}\n\tSTRB R0, .WriteChar\n\tRET\n",
     "WriteString" => "\tPOP {R0}\n\tSTR R0, .WriteString\n\tRET\n",
     "WriteSignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteSignedNum\n\tRET\n",
     "WriteUnsignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteUnsignedNum\n\tRET\n",
@@ -678,20 +679,26 @@ impl<'a> GenScope<'a> {
 
     /// Allocate space for an anonymous variable, return its stack frame offset.
     pub fn allocate_anon(&mut self, size: u32) -> i32 {
+        let mut actual_size = (size >> 2) << 2;
+
+        if actual_size < 4 {
+            actual_size = 4;
+        }
+
         // look for a free spot first before allocing.
         let mut offset = 0;
 
         for (spot_size, in_use) in self.frame.iter_mut() {
             offset += *spot_size;
 
-            if *spot_size == size && !*in_use {
+            if *spot_size == actual_size && !*in_use {
                 *in_use = true;
                 return offset as i32;
             }
         }
 
-        self.stack_top_pos += size as i32;
-        self.frame.push((size, true));
+        self.stack_top_pos += actual_size as i32;
+        self.frame.push((actual_size, true));
 
         self.stack_top_pos
     }
