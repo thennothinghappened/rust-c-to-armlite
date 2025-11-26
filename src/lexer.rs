@@ -68,7 +68,7 @@ impl<'a> Lexer<'a> {
             let kind = self.lex_next();
             let end = self.index;
 
-            if kind == TokenKind::MacroExpansionMarker {
+            if kind == TokenKind::DiscardMarker {
                 continue;
             }
 
@@ -194,6 +194,15 @@ impl<'a> Lexer<'a> {
             return basic_token;
         }
 
+        if self.accept_char('/') {
+            if self.accept_char('/') {
+                self.take_chars_until(is_newline);
+                return TokenKind::DiscardMarker;
+            }
+
+            return TokenKind::Divide;
+        }
+
         if self.accept_char('#') {
             // Preprocessor directive!
             let directive = self.take_chars_while(is_valid_identifier);
@@ -265,7 +274,7 @@ impl<'a> Lexer<'a> {
                 _ => panic!("Unknown directive `#{directive}`"),
             }
 
-            return TokenKind::MacroExpansionMarker;
+            return TokenKind::DiscardMarker;
         }
 
         if self.accept_char('+') {

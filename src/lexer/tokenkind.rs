@@ -19,6 +19,7 @@ pub(crate) enum TokenKind {
     PlusPlus,
     Minus,
     MinusMinus,
+    Divide,
     BooleanEqual,
     LessThan,
     GreaterThan,
@@ -50,9 +51,10 @@ pub(crate) enum TokenKind {
     Unknown(char),
     Eof,
 
-    /// Not a real source-code token! This will never be seen by the parser, and is an indication
-    /// inside the lexer regarding what's going on.
-    MacroExpansionMarker,
+    /// Not a real source-code token! This will never be seen by the parser. The lexer uses this
+    /// to specify that some other thing has happened (e.g. macro expansion, or a comment), which
+    /// the parser doesn't need to know about.
+    DiscardMarker,
 }
 
 pub(crate) type IdentId = usize;
@@ -77,6 +79,7 @@ impl TryFrom<TokenKind> for &'static str {
             TokenKind::PlusPlus => "++",
             TokenKind::Minus => "-",
             TokenKind::MinusMinus => "--",
+            TokenKind::Divide => "/",
             TokenKind::BooleanEqual => "==",
             TokenKind::LessThan => "<",
             TokenKind::GreaterThan => ">",
@@ -108,7 +111,7 @@ impl TryFrom<TokenKind> for &'static str {
 
             TokenKind::IntLiteral(_) | TokenKind::Unknown(_) => return Err(()),
 
-            TokenKind::MacroExpansionMarker => "<<Macro Expansion>>",
+            TokenKind::DiscardMarker => "<<Internal Discard Marker>>",
             TokenKind::Eof => "<<End Of File>>",
         })
     }
