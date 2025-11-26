@@ -18,7 +18,7 @@ use crate::{
             expr::{call::Call, BinaryOp, Expr},
             statement::{Block, Statement, Variable},
             types::{CConcreteType, CFunc, CFuncType, CType, CTypeBuiltin},
-            Program,
+            Program, Symbol,
         },
         TodoType,
     },
@@ -137,7 +137,7 @@ impl Generator {
 
         output += "\n\t; # Named Stack Variables\n";
         for (name, offset) in scope.named_vars.iter().sorted_by(|&a, &b| a.1.cmp(b.1)) {
-            output += &format!("\t; - {name}: [R11-#{offset}]\n");
+            output += &format!("\t; - {name}: {}\n", stack_offset(*offset));
         }
 
         output += &format!("\t;\n\t; Stack allocated size = {}\n", scope.stack_top_pos);
@@ -147,6 +147,19 @@ impl Generator {
         output += &format!("{}:\n", self.name_of_label(func_name, "done"));
         output += "\tMOV SP, R11\n";
         output += "\tPOP {R11, LR}\n";
+
+        if !scope.cfunc_type.args.is_empty() {
+            output += &format!(
+                "\tADD SP, SP, #{}\t\t; Eat the caller's args.\n",
+                scope
+                    .cfunc_type
+                    .args
+                    .iter()
+                    .map(|arg| self.sizeof_ctype(&arg.ctype))
+                    .sum::<u32>()
+            );
+        }
+
         output += "\tRET\n";
 
         output
@@ -192,12 +205,13 @@ impl Generator {
                         // (presumably) struct to to return it to them, rather than splitting it
                         // across registers or something.
                         out += "\tLDR R0, [R11+#4]\t\t; Grab the return storage address.\n";
-                        out += &format!("\tLDR R1, [R11-#{temp_storage}]\n");
+                        out += &format!("\tLDR R1, {}\n", stack_offset(temp_storage));
                         out += "\tSTR R1, [R0]\n";
                     } else {
                         // we can neatly return the value in one register. yay!
                         out += &format!(
-                            "\tLDR R0, [R11-#{temp_storage}]\t\t; Put the returned value in R0.\n"
+                            "\tLDR R0, {}\t\t; Put the returned value in R0.\n",
+                            stack_offset(temp_storage)
                         );
                     }
 
@@ -238,7 +252,7 @@ impl Generator {
                 let anon_name = format!("str_{}", self.next_anon_id());
 
                 out += &format!("\tMOV R0, #{anon_name}\n");
-                out += &format!("\tSTR R0, [R11-#{result_offset}]\n");
+                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
 
                 self.constant_strings
                     .borrow_mut()
@@ -253,7 +267,7 @@ impl Generator {
 
                 // ints are nice and relaxed :)
                 out += &format!("\tMOV R0, #{value}\n");
-                out += &format!("\tSTR R0, [R11-#{result_offset}]\n");
+                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
             }
 
             Expr::Reference(name) => {
@@ -262,17 +276,32 @@ impl Generator {
                     return out;
                 };
 
-                // Figure out where the hell this reference points!!!
-
-                // is it local?!
                 if let Some(source_offset) = scope.offset_of_var(name) {
                     out += &format!("\t; === query localvar `{name}` ===\n");
-                    out += &format!("\tLDR R0, [R11-#{source_offset}]\n");
-                    out += &format!("\tSTR R0, [R11-#{result_offset}]\n");
+                    out += &format!("\tLDR R0, {}\n", stack_offset(source_offset));
+                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
                     out += &format!("\t; === done query `{name}` ===\n\n");
-                } else {
-                    panic!("unknown storage for {name}")
+                    return out;
                 }
+
+                if let Some(symbol) = self.program.get_symbol(name) {
+                    match symbol {
+                        Symbol::Func(cfunc) => {
+                            out += &format!("\tMOV R0, #fn_{name}\n");
+                            out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                        }
+
+                        Symbol::Var(ctype, expr) => {
+                            out += &format!("\tMOV R0, #var_{name}\n");
+                            out += "\tLDR R0, [R0]\n";
+                            out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                        }
+                    };
+
+                    return out;
+                }
+
+                panic!("Reference to undefined variable `{name}`");
             }
 
             Expr::Call(Call {
@@ -320,22 +349,27 @@ impl Generator {
 
                 match &**target {
                     Expr::Reference(name) => {
+                        // Direct reference to a function by name. sane common case! we can just BL
+                        // there using its label name.
                         out += &format!("\tBL fn_{name}\n");
                     }
 
-                    Expr::Call(call) => todo!("func that returns func >:("),
+                    expr => {
+                        // FIXME: we should support type coersion rules. ugghhhhh
+                        let temp_fn_ptr_var = scope.allocate_anon(Self::WORD_SIZE.into());
 
-                    Expr::BinaryOp(binary_op, expr, expr1) => {
-                        todo!("weird-ass binary op shenanigans returning a func")
+                        // Resolve the function pointer.
+                        out += &self.generate_expr(
+                            scope,
+                            expr,
+                            Some((temp_fn_ptr_var, &CType::AsIs(CConcreteType::Func(*sig_id)))),
+                        );
+
+                        out += "\tMOV LR, PC\t\t; Manually set LR (TODO: shouldn't this be +4??)\n";
+                        out += &format!("\tLDR PC, {}\n", stack_offset(temp_fn_ptr_var));
+
+                        scope.forget(temp_fn_ptr_var);
                     }
-
-                    Expr::UnaryOp(unary_op, expr) => {
-                        todo!("weird-ass unary op shenanigans returning a func")
-                    }
-
-                    Expr::Cast(expr, _) => todo!("casting func ptrs"),
-
-                    _ => panic!("bad call target {target:?}"),
                 };
 
                 for (spot, _) in arg_target_spots {
@@ -348,8 +382,11 @@ impl Generator {
                 };
 
                 if self.sizeof_ctype(&sig.returns) <= Self::WORD_SIZE.into() {
-                    out += &format!("\tSTR R0, [R11-#{out_pos}]\n");
-                    out += &format!("\t; === END Call {target} => R0 => [R11-#{out_pos}] ===\n\n");
+                    out += &format!("\tSTR R0, {}\n", stack_offset(out_pos));
+                    out += &format!(
+                        "\t; === END Call {target} => R0 => {} ===\n\n",
+                        stack_offset(out_pos)
+                    );
                 } else {
                     // no-op, we should've passed this info earlier.
                 }
@@ -377,8 +414,8 @@ impl Generator {
 
                     out += &self.generate_expr(scope, left, Some((left_temp, ctype)));
                     out += &self.generate_expr(scope, right, Some((right_temp, ctype)));
-                    out += &format!("\tLDR R0, [R11-#{left_temp}]\n");
-                    out += &format!("\tLDR R1, [R11-#{right_temp}]\n");
+                    out += &format!("\tLDR R0, {}\n", stack_offset(left_temp));
+                    out += &format!("\tLDR R1, {}\n", stack_offset(right_temp));
 
                     scope.forget(left_temp);
                     scope.forget(right_temp);
@@ -386,7 +423,7 @@ impl Generator {
                     out += &format!("\tADD SP, SP, #{}\n", ctype_size * 2);
 
                     out += "\tADD R0, R0, R1\n";
-                    out += &format!("\tSTR R0, [R11-#{result_offset}]\n");
+                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
                     out += &format!("\t; === END binop({left} + {right}) ===\n\n");
                 }
 
@@ -568,8 +605,30 @@ impl<'a> GenScope<'a> {
 
     /// Get the offset of a previously defined local variable, if it exists.
     pub fn offset_of_var(&self, name: &str) -> Option<i32> {
-        self.named_vars.get(name).copied()
+        if let Some(offset) = self.named_vars.get(name) {
+            return Some(*offset);
+        }
+
+        let mut offset: i32 = -4;
+
+        for arg in self.cfunc_type.args.iter() {
+            offset -= self.generator.sizeof_ctype(&arg.ctype) as i32;
+
+            if arg.name.as_deref() == Some(name) {
+                return Some(offset);
+            }
+        }
+
+        None
     }
+}
+
+fn stack_offset(offset: i32) -> String {
+    format!(
+        "[R11{}#{}]",
+        if offset >= 0 { '-' } else { '+' },
+        offset.abs()
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
