@@ -60,7 +60,8 @@ static BUILTIN_FUNCS: phf::Map<&str, &str> = phf_map! {
     "WriteSignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteSignedNum\n\tRET\n",
     "WriteUnsignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteUnsignedNum\n\tRET\n",
     "ReadString" => "\tPOP {R0}\n\tSTR R0, .ReadString\n\tRET\n",
-    "add" => "\tPOP {R0, R1}\n\tADD R0, R0, R1\n\tRET\n"
+    "add" => "\tPOP {R0, R1}\n\tADD R0, R0, R1\n\tRET\n",
+    "if_" => "\tPOP {R0, R1, R2}\n\tCMP R2, #0\n\tBEQ Lif_false__fn_if_\n\tMOV PC, R1\nLif_false__fn_if_:\n\tMOV PC, R0\n"
 };
 
 pub struct Generator {
@@ -133,8 +134,12 @@ impl Generator {
         let body_content = self.generate_block(&mut scope, statements);
 
         output += "\n\t; # Named Stack Variables\n";
-        for (name, offset) in scope.named_vars.iter().sorted_by(|&a, &b| a.1.cmp(b.1)) {
-            output += &format!("\t; - {name}: {}\n", stack_offset(*offset));
+        for (name, (offset, ctype)) in scope
+            .named_vars
+            .iter()
+            .sorted_by(|&a, &b| a.1 .0.cmp(&b.1 .0))
+        {
+            output += &format!("\t; - {ctype:?} {name}: {}\n", stack_offset(*offset));
         }
 
         output += &format!("\t;\n\t; Stack allocated size = {}\n", scope.stack_top_pos);
@@ -168,8 +173,7 @@ impl Generator {
         for statement in statements {
             match statement {
                 Statement::Declare(variable) => {
-                    let variable_size = self.sizeof_ctype(&variable.ctype);
-                    let variable_offset = scope.allocate_var(variable.name.clone(), variable_size);
+                    let variable_offset = scope.allocate_var(variable.name.clone(), variable.ctype);
 
                     if let Some(expr) = &variable.value {
                         // eval the initial val.
@@ -273,11 +277,46 @@ impl Generator {
                     return out;
                 };
 
-                if let Some(source_offset) = scope.offset_of_var(name) {
+                if let Some((source_offset, source_ctype)) = scope.get_localvar(name) {
                     out += &format!("\t; === query localvar `{name}` ===\n");
-                    out += &format!("\tLDR R0, {}\n", stack_offset(source_offset));
-                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+
+                    match source_ctype {
+                        CType::AsIs(cconcrete_type) => {
+                            out += &format!("\tLDR R0, {}\n", stack_offset(source_offset));
+                            out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                        }
+
+                        CType::PointerTo(ctype_id) => match ctype {
+                            CType::AsIs(cconcrete_type) => {
+                                panic!("can't cast a pointer to a value type")
+                            }
+
+                            CType::PointerTo(ctype_id) => {
+                                out += &format!("\tLDR R0, {}\n", stack_offset(source_offset));
+                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                            }
+
+                            CType::ArrayOf(ctype_id, size) => todo!("load array from pointer"),
+                        },
+
+                        CType::ArrayOf(ctype_id, _) => match ctype {
+                            CType::AsIs(cconcrete_type) => {
+                                panic!("can't cast an array to a value type")
+                            }
+
+                            CType::PointerTo(ctype_id) => {
+                                out += &format!("\tSUB R0, R11, #{source_offset}\n");
+                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                            }
+
+                            CType::ArrayOf(ctype_id, _) => {
+                                todo!("array copying!")
+                            }
+                        },
+                    }
+
                     out += &format!("\t; === done query `{name}` ===\n\n");
+
                     return out;
                 }
 
@@ -453,10 +492,6 @@ impl Generator {
         id.to_string()
     }
 
-    // fn generate_expr_call(&self, ) -> {
-
-    // }
-
     fn type_of_expr(&self, expr: &Expr) -> CType {
         todo!("determine the type of an expression")
     }
@@ -464,54 +499,57 @@ impl Generator {
     const WORD_SIZE: u16 = 4;
 
     fn sizeof_ctype(&self, ctype: &CType) -> u32 {
-        *self
-            .ctype_size_cache
-            .borrow_mut()
-            .entry(*ctype)
-            .or_insert_with(|| match ctype {
-                CType::PointerTo(_) => Self::WORD_SIZE.into(),
+        if let Some(size) = self.ctype_size_cache.borrow().get(ctype) {
+            return *size;
+        }
 
-                CType::ArrayOf(inner_id, element_count) => {
-                    self.sizeof_ctype(self.program.get_ctype(*inner_id)) * element_count
-                }
+        let size = match ctype {
+            CType::PointerTo(_) => Self::WORD_SIZE.into(),
 
-                CType::AsIs(concrete) => match concrete {
-                    CConcreteType::Struct(cstruct_id) => self
-                        .program
-                        .get_struct(*cstruct_id)
-                        .members
-                        .as_ref()
-                        .map(|members| {
-                            members
-                                .iter()
-                                .map(|member| self.sizeof_ctype(&member.ctype))
-                                .sum()
-                        })
-                        .unwrap_or(0),
+            CType::ArrayOf(inner_id, element_count) => {
+                self.sizeof_ctype(self.program.get_ctype(*inner_id)) * element_count
+            }
 
-                    CConcreteType::Enum(cenum_id) => Self::WORD_SIZE.into(),
-                    CConcreteType::Func(_) => Self::WORD_SIZE.into(),
+            CType::AsIs(concrete) => match concrete {
+                CConcreteType::Struct(cstruct_id) => self
+                    .program
+                    .get_struct(*cstruct_id)
+                    .members
+                    .as_ref()
+                    .map(|members| {
+                        members
+                            .iter()
+                            .map(|member| self.sizeof_ctype(&member.ctype))
+                            .sum()
+                    })
+                    .unwrap_or(0),
 
-                    CConcreteType::Builtin(builtin) => match builtin {
-                        CTypeBuiltin::Void => 0,
-                        CTypeBuiltin::Bool => 1,
-                        CTypeBuiltin::Char => 1,
-                        CTypeBuiltin::SignedChar => 1,
-                        CTypeBuiltin::UnsignedChar => 1,
-                        CTypeBuiltin::Short => 2,
-                        CTypeBuiltin::UnsignedShort => 2,
-                        CTypeBuiltin::Int => Self::WORD_SIZE.into(),
-                        CTypeBuiltin::UnsignedInt => Self::WORD_SIZE.into(),
-                        CTypeBuiltin::Long => Self::WORD_SIZE.into(),
-                        CTypeBuiltin::UnsignedLong => Self::WORD_SIZE.into(),
-                        CTypeBuiltin::LongLong => 8,
-                        CTypeBuiltin::UnsignedLongLong => 8,
-                        CTypeBuiltin::Float => 2,
-                        CTypeBuiltin::Double => 4,
-                        CTypeBuiltin::LongDouble => 4,
-                    },
+                CConcreteType::Enum(cenum_id) => Self::WORD_SIZE.into(),
+                CConcreteType::Func(_) => Self::WORD_SIZE.into(),
+
+                CConcreteType::Builtin(builtin) => match builtin {
+                    CTypeBuiltin::Void => 0,
+                    CTypeBuiltin::Bool => 1,
+                    CTypeBuiltin::Char => 1,
+                    CTypeBuiltin::SignedChar => 1,
+                    CTypeBuiltin::UnsignedChar => 1,
+                    CTypeBuiltin::Short => 2,
+                    CTypeBuiltin::UnsignedShort => 2,
+                    CTypeBuiltin::Int => Self::WORD_SIZE.into(),
+                    CTypeBuiltin::UnsignedInt => Self::WORD_SIZE.into(),
+                    CTypeBuiltin::Long => Self::WORD_SIZE.into(),
+                    CTypeBuiltin::UnsignedLong => Self::WORD_SIZE.into(),
+                    CTypeBuiltin::LongLong => 8,
+                    CTypeBuiltin::UnsignedLongLong => 8,
+                    CTypeBuiltin::Float => 2,
+                    CTypeBuiltin::Double => 4,
+                    CTypeBuiltin::LongDouble => 4,
                 },
-            })
+            },
+        };
+
+        self.ctype_size_cache.borrow_mut().insert(*ctype, size);
+        size
     }
 }
 
@@ -520,7 +558,7 @@ struct GenScope<'a> {
     cfunc_name: &'a str,
     cfunc_type: &'a CFuncType,
     stack_top_pos: i32,
-    named_vars: HashMap<String, i32>,
+    named_vars: HashMap<String, (i32, CType)>,
     frame: Vec<(u32, bool)>,
 }
 
@@ -537,9 +575,9 @@ impl<'a> GenScope<'a> {
     }
 
     /// Allocate space for a local variable, return its stack frame offset.
-    pub fn allocate_var(&mut self, name: String, size: u32) -> i32 {
-        let offset = self.allocate_anon(size);
-        self.named_vars.insert(name, offset);
+    pub fn allocate_var(&mut self, name: String, ctype: CType) -> i32 {
+        let offset = self.allocate_anon(self.generator.sizeof_ctype(&ctype));
+        self.named_vars.insert(name, (offset, ctype));
 
         offset
     }
@@ -597,7 +635,7 @@ impl<'a> GenScope<'a> {
     }
 
     /// Get the offset of a previously defined local variable, if it exists.
-    pub fn offset_of_var(&self, name: &str) -> Option<i32> {
+    pub fn get_localvar(&self, name: &str) -> Option<(i32, CType)> {
         if let Some(offset) = self.named_vars.get(name) {
             return Some(*offset);
         }
@@ -608,7 +646,7 @@ impl<'a> GenScope<'a> {
             offset -= self.generator.sizeof_ctype(&arg.ctype) as i32;
 
             if arg.name.as_deref() == Some(name) {
-                return Some(offset);
+                return Some((offset, arg.ctype));
             }
         }
 

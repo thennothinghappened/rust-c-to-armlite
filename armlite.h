@@ -9,4 +9,6 @@ void ReadString(char* outputString);
 
 int add(int a, int b);
 
+void if_(int condition, void* if_true, void* if_false);
+
 #endif

@@ -1,24 +1,13 @@
 
 #include "armlite.h"
 
-int return_a_plus_3(int a) {
-	return a + 3;
-}
-
-int (((((((((*get_func_ptr(int a))))))))))() {
-	return return_a_plus_3;
-}
-
 int main() {
-	// int c = 1 + 2;
+	char name[128];
 
-	int (((((((((((((((((((((((((((((((a))))))))))))))))))))))))))))))) = 3;
-	
-	WriteString("The number is:");
-	WriteSignedNum(add(3 + add(1, 2), 5));
-	WriteString("\nand func ptr result\":");
-	WriteSignedNum((get_func_ptr())(2));
+	WriteString("Enter your name:");
+	ReadString(name);
 
-
-	return 5;
+	WriteString("\nHello, ");
+	WriteString(name);
+	WriteString("!\n");
 }
