@@ -47,7 +47,7 @@ c_halt:
 	HLT
 	B c_halt
 
-const_c_entry_exitcode_msg_start:	.ASCIZ "Program exited with code "
+const_c_entry_exitcode_msg_start:	.ASCIZ "\nProgram exited with code "
 const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
 
 ; ==================================================================================================
