@@ -16,7 +16,7 @@ int main() {
 	
 	WriteString("The number is:");
 	WriteSignedNum(add(3 + add(1, 2), 5));
-	WriteString("and func ptr result:");
+	WriteString("\nand func ptr result\":");
 	WriteSignedNum((get_func_ptr())(2));
 
 

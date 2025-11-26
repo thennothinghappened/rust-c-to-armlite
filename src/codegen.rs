@@ -450,7 +450,7 @@ impl Generator {
     }
 
     fn escape_string_literal(string: &str) -> String {
-        string.replace("\\", "\\\\").replace("\"", "\\\"")
+        string.replace("\"", "\\\"")
     }
 
     fn next_anon_id(&self) -> String {

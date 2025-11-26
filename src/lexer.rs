@@ -302,7 +302,22 @@ impl<'a> Lexer<'a> {
         }
 
         if self.accept_char('"') {
-            let content = self.take_chars_while(|char| char != '"');
+            let mut escape_next = false;
+
+            let content = self.take_chars_while(|char| {
+                if escape_next {
+                    escape_next = false;
+                    return true;
+                }
+
+                if char == '\\' {
+                    escape_next = true;
+                    return true;
+                }
+
+                char != '"'
+            });
+
             self.consume_char('"');
 
             return TokenKind::StringLiteral(self.context.allocate_ident(content));

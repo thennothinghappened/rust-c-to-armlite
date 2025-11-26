@@ -1,9 +1,9 @@
 use crate::lexer::Lexer;
 
 impl<'a> Lexer<'a> {
-    pub(super) fn take_chars_while<F>(&mut self, predicate: F) -> &'a str
+    pub(super) fn take_chars_while<F>(&mut self, mut predicate: F) -> &'a str
     where
-        F: Fn(char) -> bool,
+        F: FnMut(char) -> bool,
     {
         let num = self
             .chars
