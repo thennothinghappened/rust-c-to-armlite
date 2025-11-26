@@ -307,6 +307,11 @@ impl Generator {
                 let new_frame_top = scope.stack_top_pos;
                 let stack_pointer_adjustment = new_frame_top - initial_frame_top;
 
+                out += &format!(
+                    "\n\t; === Call {target}({}) [{stack_pointer_adjustment} arg bytes] ===\n",
+                    args.iter().join(", ")
+                );
+
                 out += &format!("\tSUB SP, SP, #{stack_pointer_adjustment}\t\t\t; Adjust SP to point at 1st call argument!\n");
 
                 for (arg, out_info) in args.iter().zip(&arg_target_spots) {
@@ -338,13 +343,15 @@ impl Generator {
                 }
 
                 let Some((out_pos, out_ctype)) = result_info else {
+                    out += &format!("\t; === END Call {target} => void ===\n\n");
                     return out;
                 };
 
                 if self.sizeof_ctype(&sig.returns) <= Self::WORD_SIZE.into() {
                     out += &format!("\tSTR R0, [R11-#{out_pos}]\n");
+                    out += &format!("\t; === END Call {target} => R0 => [R11-#{out_pos}] ===\n\n");
                 } else {
-                    todo!("handle large (>1 register) return types")
+                    // no-op, we should've passed this info earlier.
                 }
             }
 
@@ -355,9 +362,32 @@ impl Generator {
                 BinaryOp::LessThan => todo!(),
 
                 BinaryOp::Plus => {
-                    // 1. allocate a var for both operands
-                    // 2. perform op
-                    // 3. store result in new var
+                    let Some((result_offset, ctype)) = result_info else {
+                        // pointless no-op.
+                        return out;
+                    };
+
+                    let ctype_size = self.sizeof_ctype(ctype);
+
+                    out += &format!("\n\t; === binop({left} + {right}) ===\n");
+                    out += &format!("\tSUB SP, SP, #{}\n", ctype_size * 2);
+
+                    let left_temp = scope.allocate_anon(ctype_size);
+                    let right_temp = scope.allocate_anon(ctype_size);
+
+                    out += &self.generate_expr(scope, left, Some((left_temp, ctype)));
+                    out += &self.generate_expr(scope, right, Some((right_temp, ctype)));
+                    out += &format!("\tLDR R0, [R11-#{left_temp}]\n");
+                    out += &format!("\tLDR R1, [R11-#{right_temp}]\n");
+
+                    scope.forget(left_temp);
+                    scope.forget(right_temp);
+
+                    out += &format!("\tADD SP, SP, #{}\n", ctype_size * 2);
+
+                    out += "\tADD R0, R0, R1\n";
+                    out += &format!("\tSTR R0, [R11-#{result_offset}]\n");
+                    out += &format!("\t; === END binop({left} + {right}) ===\n\n");
                 }
 
                 BinaryOp::ArraySubscript => todo!(),

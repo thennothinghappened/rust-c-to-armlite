@@ -2,10 +2,10 @@
 #include "armlite.h"
 
 int main() {
-	int c = 1 + 2;
+	// int c = 1 + 2;
 
 	WriteString("The number is:");
-	WriteSignedNum(add(1, 2));
+	WriteSignedNum(add(3 + add(1, 2), 5));
 
 	return 5;
 }
