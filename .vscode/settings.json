@@ -7,7 +7,7 @@
         "*.yyp": "json5",
         "*.yy": "json5",
         "*.gml": "gml",
-        "*.armlite": "arm",
+        "*.armlite": "armlite",
         "random": "c",
         "test.h": "c"
     },

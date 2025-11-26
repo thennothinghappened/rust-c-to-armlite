@@ -1,6 +1,6 @@
 use std::{
     env::args,
-    fs::{read, read_to_string},
+    fs::{self, read, read_to_string},
     io::stdin,
 };
 
@@ -30,7 +30,16 @@ fn main() {
 
     if let Some(path) = args().nth(1) {
         let buf = read_to_string(&path).expect("Must pass a valid path to read from");
-        return parse_program(&buf, &path, &codespan_writer, &codespan_config);
+
+        let Some(output) = parse_program(&buf, &path, &codespan_writer, &codespan_config) else {
+            return;
+        };
+
+        if let Some(out_path) = args().nth(2) {
+            fs::write(out_path, output).expect("Failed to write output asm file");
+        }
+
+        return;
     }
 
     let stdin = stdin();
@@ -55,7 +64,7 @@ fn parse_program(
     file_name: &str,
     codespan_writer: &term::termcolor::StandardStream,
     codespan_config: &term::Config,
-) {
+) -> Option<String> {
     let lexer = Lexer::new(buf);
     let parser = Parser::new(lexer);
 
@@ -75,7 +84,7 @@ fn parse_program(
                 &diagnostic,
             )
             .unwrap();
-            return;
+            return None;
         }
     };
 
@@ -83,4 +92,6 @@ fn parse_program(
 
     let output = codegen::Generator::new(program).generate();
     println!("--- Code generated ---\n{output}");
+
+    return Some(output);
 }
