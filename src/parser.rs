@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use thiserror::Error;
 
 use crate::{
@@ -123,6 +122,27 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_variable_name(&mut self, initial_type: CType) -> Result<(String, CType), ParseError> {
+        if self.lexer.accept(TokenKind::OpenParen) {
+            let (name, mut this_type) = self.parse_variable_name(initial_type)?;
+
+            if self.lexer.next_is(TokenKind::OpenParen) {
+                // function pointer AHHHHHHHHHHHH
+                let CType::PointerTo(return_ctype_id) = this_type else {
+                    return self.error("Expecting a pointer when parsing a function type");
+                };
+
+                let args = self.parse_func_decl_args()?;
+
+                this_type = CType::AsIs(CConcreteType::Func(self.program.func_type(CFuncType {
+                    args,
+                    returns: *self.program.get_ctype(return_ctype_id),
+                })));
+            }
+
+            self.lexer.expect(TokenKind::CloseParen)?;
+            return Ok((name, this_type));
+        }
+
         let mut this_type = self.parse_type_pointersssss(initial_type)?;
         let name = self.lexer.consume_ident()?;
 
@@ -259,21 +279,29 @@ impl<'a> Parser<'a> {
                 // expression. We'll cheat by spawning two clones of this parser and parsing both
                 // possible interpretations, then picking the one that works.
 
-                if self.clone().parse_variable_decl().is_ok() {
+                let parse_as_variable_result = self.clone().parse_variable_decl();
+
+                if parse_as_variable_result.is_ok() {
                     let decl = self.parse_variable_decl().unwrap();
                     self.lexer.expect(TokenKind::Semicolon)?;
 
                     return Ok(decl);
                 }
 
-                if self.clone().parse_expr(0).is_ok() {
+                let parse_as_expr_result = self.clone().parse_expr(0);
+
+                if parse_as_expr_result.is_ok() {
                     let expr = self.parse_expr(0).unwrap();
                     self.lexer.expect(TokenKind::Semicolon)?;
 
                     return Ok(Statement::Expr(expr));
                 }
 
-                Err(self.unexpected_token())
+                self.error(format!(
+                    "Not a variable decl: {}\nAnd not an expression: {}",
+                    parse_as_variable_result.unwrap_err(),
+                    parse_as_expr_result.unwrap_err()
+                ))
             }
         }
     }
@@ -369,17 +397,18 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                // joyous times ahead. parser takes the bullet so codegen can live in peace
-                let sig = match &self.resolve_ctype(&operand)? {
+                let sig_id = match &self.resolve_ctype(&operand)? {
                     CType::AsIs(CConcreteType::Func(id)) => *id,
                     ctype => return self.error(format!("{ctype:?} is not a function type")),
                 };
 
                 operand = Expr::Call(Call {
                     target: Box::new(operand),
-                    sig_id: sig,
+                    sig_id,
                     args,
                 });
+
+                println!("{operand}");
 
                 continue;
             }
@@ -499,7 +528,9 @@ impl<'a> Parser<'a> {
 
             builder
                 .member(Some(member_name), member_type)
-                .map_err(|err| self.bad_definition(Span::new(start_pos, end_pos), anyhow!(err)))?;
+                .map_err(|err| {
+                    self.bad_definition(Span::new(start_pos, end_pos), anyhow::anyhow!(err))
+                })?;
         }
 
         match struct_name {
