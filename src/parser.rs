@@ -366,9 +366,10 @@ impl<'a> Parser<'a> {
         }
 
         let Some(op) = self.lexer.maybe_map_next(|token| match token {
-            TokenKind::PlusPlus => Some(UnaryOp::GetThenIncrement),
-            TokenKind::MinusMinus => Some(UnaryOp::GetThenDecrement),
+            TokenKind::PlusPlus => Some(UnaryOp::IncrementThenGet),
+            TokenKind::MinusMinus => Some(UnaryOp::DecrementThenGet),
             TokenKind::SizeOf => Some(UnaryOp::SizeOf),
+            TokenKind::BooleanNot => Some(UnaryOp::BooleanNot),
             _ => None,
         }) else {
             return self.parse_postfix_expr();

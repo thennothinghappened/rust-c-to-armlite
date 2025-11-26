@@ -171,65 +171,118 @@ impl Generator {
     fn generate_block(&self, scope: &mut GenScope, statements: &Vec<Statement>) -> String {
         let mut out = String::new();
 
-        for statement in statements {
-            match statement {
-                Statement::Declare(variable) => {
-                    let variable_offset = scope.allocate_var(variable.name.clone(), variable.ctype);
-
-                    if let Some(expr) = &variable.value {
-                        // eval the initial val.
-                        out += &self.generate_expr(
-                            scope,
-                            expr,
-                            Some((variable_offset, variable.ctype)),
-                        );
-                    }
-                }
-
-                Statement::Expr(expr) => {
-                    out += &self.generate_expr(scope, expr, None);
-                }
-
-                Statement::Return(expr) => {
-                    let return_type_size = self.sizeof_ctype(scope.cfunc_type.returns);
-                    let temp_storage = scope.allocate_anon(return_type_size);
-
-                    out += "\t; <return>\n";
-
-                    out += &self.generate_expr(
-                        scope,
-                        expr,
-                        Some((temp_storage, scope.cfunc_type.returns)),
-                    );
-
-                    if return_type_size > Self::WORD_SIZE as u32 {
-                        // the caller pushes an address where they want us to copy the returned
-                        // (presumably) struct to to return it to them, rather than splitting it
-                        // across registers or something.
-                        out += "\tLDR R0, [R11+#4]\t\t; Grab the return storage address.\n";
-                        out += &format!("\tLDR R1, {}\n", stack_offset(temp_storage));
-                        out += "\tSTR R1, [R0]\n";
-                    } else {
-                        // we can neatly return the value in one register. yay!
-                        out += &format!(
-                            "\tLDR R0, {}\t\t; Put the returned value in R0.\n",
-                            stack_offset(temp_storage)
-                        );
-                    }
-
-                    scope.forget(temp_storage);
-
-                    out += &format!(
-                        "\tB {}\t\t; Perform the cleanup.\n",
-                        self.name_of_label(scope.cfunc_name, "done")
-                    );
-
-                    out += "\t; </return>\n\n";
-                }
-
-                _ => out += &format!("\tUnhandled statement: {statement:?}\n"),
-            };
+        for stmt in statements {
+            out += &self.generate_stmt(scope, stmt);
         }
+
+        out
+    }
+
+    fn generate_stmt(&self, scope: &mut GenScope, stmt: &Statement) -> String {
+        let mut out = String::new();
+
+        match stmt {
+            Statement::Declare(variable) => {
+                let variable_offset = scope.allocate_var(variable.name.clone(), variable.ctype);
+
+                if let Some(expr) = &variable.value {
+                    // eval the initial val.
+                    out +=
+                        &self.generate_expr(scope, expr, Some((variable_offset, variable.ctype)));
+                }
+            }
+
+            Statement::Expr(expr) => {
+                out += &self.generate_expr(scope, expr, None);
+            }
+
+            Statement::Return(expr) => {
+                let return_type_size = self.sizeof_ctype(scope.cfunc_type.returns);
+                let temp_storage = scope.allocate_anon(return_type_size);
+
+                out += "\t; <return>\n";
+
+                out += &self.generate_expr(
+                    scope,
+                    expr,
+                    Some((temp_storage, scope.cfunc_type.returns)),
+                );
+
+                if return_type_size > Self::WORD_SIZE as u32 {
+                    // the caller pushes an address where they want us to copy the returned
+                    // (presumably) struct to to return it to them, rather than splitting it
+                    // across registers or something.
+                    out += "\tLDR R0, [R11+#4]\t\t; Grab the return storage address.\n";
+                    out += &format!("\tLDR R1, {}\n", stack_offset(temp_storage));
+                    out += "\tSTR R1, [R0]\n";
+                } else {
+                    // we can neatly return the value in one register. yay!
+                    out += &format!(
+                        "\tLDR R0, {}\t\t; Put the returned value in R0.\n",
+                        stack_offset(temp_storage)
+                    );
+                }
+
+                scope.forget(temp_storage);
+
+                out += &format!(
+                    "\tB {}\t\t; Perform the cleanup.\n",
+                    self.name_of_label(scope.cfunc_name, "done")
+                );
+
+                out += "\t; </return>\n\n";
+            }
+
+            Statement::If {
+                condition,
+                if_true,
+                if_false,
+            } => {
+                let if_false_label = self.name_of_label(scope.cfunc_name, &self.next_anon_id());
+                let done_label = self.name_of_label(scope.cfunc_name, &self.next_anon_id());
+                let temp_condition_storage = scope.allocate_anon(4);
+
+                out += &format!("\t; if ({condition})\n");
+
+                out += &self.generate_expr(
+                    scope,
+                    condition,
+                    Some((
+                        temp_condition_storage,
+                        CType::AsIs(CConcreteType::Builtin(CBuiltinType::Bool)),
+                    )),
+                );
+
+                out += &format!("\tLDR R0, {}\n", stack_offset(temp_condition_storage));
+                scope.forget(temp_condition_storage);
+
+                out += "\tCMP R0, #0\n";
+
+                if if_false.is_some() {
+                    out += &format!("\tBEQ {if_false_label}\n");
+                } else {
+                    out += &format!("\tBEQ {done_label}\n");
+                }
+
+                out += "\t; then\n";
+                out += &self.generate_stmt(scope, if_true);
+
+                if let Some(if_false) = if_false {
+                    out += &format!("\tB {done_label}\n");
+
+                    out += "\t; else\n";
+                    out += &format!("{if_false_label}:\n");
+                    out += &self.generate_stmt(scope, if_false);
+                }
+
+                out += &format!("\t; endif ({condition})\n");
+                out += &format!("{done_label}:\n");
+            }
+
+            Statement::Block(Block(stmts)) => out += &self.generate_block(scope, stmts),
+
+            _ => out += &format!("\tUnhandled statement: {stmt:?}\n"),
+        };
 
         out
     }
@@ -434,14 +487,55 @@ impl Generator {
 
             Expr::BinaryOp(op, left, right) => {
                 match op {
-                    BinaryOp::AndThen => todo!(),
+                    BinaryOp::AndThen => {
+                        out += &self.generate_expr(scope, left, None);
+                        out += &self.generate_expr(scope, right, result_info);
+                    }
+
                     BinaryOp::Assign => todo!(),
-                    BinaryOp::BooleanEqual => todo!(),
+
+                    BinaryOp::BooleanEqual => {
+                        let left_ctype = scope.type_of_expr(left);
+                        let left_temp = scope.allocate_anon(self.sizeof_ctype(left_ctype));
+
+                        let right_ctype = scope.type_of_expr(right);
+                        let right_temp = scope.allocate_anon(self.sizeof_ctype(right_ctype));
+
+                        out += &self.generate_expr(
+                            scope,
+                            left,
+                            Some((left_temp, scope.type_of_expr(left))),
+                        );
+
+                        out += &self.generate_expr(
+                            scope,
+                            right,
+                            Some((right_temp, scope.type_of_expr(right))),
+                        );
+
+                        let Some((result_offset, ctype)) = result_info else {
+                            // discard the result.
+                            return out;
+                        };
+
+                        out += &format!("\tLDR R0, {}\n", stack_offset(left_temp));
+                        out += &format!("\tLDR R1, {}\n", stack_offset(right_temp));
+                        scope.forget(left_temp);
+                        scope.forget(right_temp);
+                        out += "\tCMP R0, R1\n";
+
+                        out += "\tBNE .+3\n";
+                        out += "\tMOV R0, #1\n";
+                        out += "\tB .+2\n";
+                        out += "\tMOV R0, #0\n";
+                        out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                    }
+
                     BinaryOp::LessThan => todo!(),
 
                     BinaryOp::Plus => {
                         let Some((result_offset, ctype)) = result_info else {
-                            // pointless no-op.
+                            // discard the result.
                             return out;
                         };
 
@@ -565,7 +659,45 @@ impl Generator {
                 }
             }
 
-            Expr::UnaryOp(op, expr) => todo!(),
+            Expr::UnaryOp(op, expr) => match op {
+                UnaryOp::IncrementThenGet => todo!(),
+                UnaryOp::GetThenIncrement => todo!(),
+                UnaryOp::DecrementThenGet => todo!(),
+                UnaryOp::GetThenDecrement => todo!(),
+
+                UnaryOp::SizeOf => {
+                    let Some((result_offset, ctype)) = result_info else {
+                        // pointless no-op.
+                        return out;
+                    };
+
+                    out += &format!(
+                        "\tMOV R0, #{}\n",
+                        self.sizeof_ctype(scope.type_of_expr(expr))
+                    );
+
+                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset))
+                }
+
+                UnaryOp::BooleanNot => {
+                    out += &self.generate_expr(scope, expr, result_info);
+
+                    if let Some((result_offset, ctype)) = result_info {
+                        out += &format!("\tLDR R0, {}\n", stack_offset(result_offset));
+                        out += "\tCMP R0, #0\n";
+                        out += "\tBNE .+3\n";
+                        out += "\tMOV R0, #1\n";
+                        out += "\tB .+2\n";
+                        out += "\tMOV R0, #0\n";
+                        out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                    }
+                }
+
+                UnaryOp::Negative => todo!(),
+                UnaryOp::AddressOf => todo!(),
+                UnaryOp::Dereference => todo!(),
+            },
+
             Expr::Cast(expr, _) => todo!(),
         };
 

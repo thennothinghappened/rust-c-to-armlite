@@ -189,6 +189,7 @@ impl<'a> Lexer<'a> {
             '>' => Some(TokenKind::GreaterThan),
             '?' => Some(TokenKind::QuestionMark),
             ':' => Some(TokenKind::Colon),
+            '!' => Some(TokenKind::BooleanNot),
             _ => None,
         }) {
             return basic_token;
