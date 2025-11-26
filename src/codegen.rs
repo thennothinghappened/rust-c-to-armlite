@@ -436,8 +436,6 @@ impl Generator {
                                     }
                                 },
                             }
-
-                            out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
                         }
                     };
 
