@@ -923,6 +923,11 @@ impl<'a> GenScope<'a> {
 
         let mut offset: i32 = -4;
 
+        if self.generator.sizeof_ctype(self.cfunc_type.returns) > Generator::WORD_SIZE as u32 {
+            // 0th implicit argument is the return address.
+            offset -= 4;
+        }
+
         for arg in self.cfunc_type.args.iter() {
             offset -= self.generator.sizeof_ctype(arg.ctype) as i32;
 
