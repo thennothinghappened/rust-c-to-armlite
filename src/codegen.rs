@@ -12,6 +12,7 @@ use itertools::Itertools;
 use phf::phf_map;
 
 use crate::{
+    codegen::arm::{FuncBuilder, Inst, Reg},
     context::Context,
     parser::{
         program::{
@@ -23,6 +24,8 @@ use crate::{
         TodoType,
     },
 };
+
+mod arm;
 
 const PRELUDE: &str = r#"
 ; ==================================================================================================
@@ -55,14 +58,47 @@ const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
 ; ==================================================================================================
 "#;
 
-static BUILTIN_FUNCS: phf::Map<&str, &str> = phf_map! {
-    "WriteChar" => "\tPOP {R0}\n\tSTRB R0, .WriteChar\n\tRET\n",
-    "WriteString" => "\tPOP {R0}\n\tSTR R0, .WriteString\n\tRET\n",
-    "WriteSignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteSignedNum\n\tRET\n",
-    "WriteUnsignedNum" => "\tPOP {R0}\n\tSTR R0, .WriteUnsignedNum\n\tRET\n",
-    "ReadString" => "\tPOP {R0}\n\tSTR R0, .ReadString\n\tRET\n",
-    "add" => "\tPOP {R0, R1}\n\tADD R0, R0, R1\n\tRET\n",
-    "if_" => "\tPOP {R0, R1, R2}\n\tCMP R2, #0\n\tBEQ Lif_false__fn_if_\n\tMOV PC, R1\nLif_false__fn_if_:\n\tMOV PC, R0\n"
+static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
+    "WriteChar" => |b| {
+        b.pop(&[Reg::R0]);
+        b.asm("STRB R0, .WriteChar");
+        b.ret();
+    },
+    "WriteString" => |b| {
+        b.pop(&[Reg::R0]);
+        b.asm("STR R0, .WriteChar");
+        b.ret();
+    },
+    "WriteSignedNum" => |b| {
+        b.pop(&[Reg::R0]);
+        b.asm("STR R0, .WriteSignedNum");
+        b.ret();
+    },
+    "WriteUnsignedNum" => |b| {
+        b.pop(&[Reg::R0]);
+        b.asm("STR R0, .WriteUnsignedNum");
+        b.ret();
+    },
+    "ReadString" => |b| {
+        b.pop(&[Reg::R0]);
+        b.asm("STR R0, .ReadString");
+        b.ret();
+    },
+    "add" => |b| {
+        b.pop(&[Reg::R0, Reg::R1]);
+        b.add(Reg::R0, Reg::R0, Reg::R1);
+        b.ret();
+    },
+    "if_" => |b| {
+        b.pop(&[Reg::R0, Reg::R1, Reg::R2]);
+
+        b.cmp(Reg::R2, 0);
+        b.beq("if_false");
+        b.mov(Reg::Pc, Reg::R1);
+
+        b.label("if_false");
+        b.mov(Reg::Pc, Reg::R0);
+    },
 };
 
 pub struct Generator {
@@ -111,69 +147,62 @@ impl Generator {
         output += "\n";
 
         let sig = self.program.get_func_type(func.sig_id);
-
-        if !sig.args.is_empty() {
-            output += "; # Arguments\n";
-
-            for arg in &sig.args {
-                match &arg.name {
-                    Some(name) => output += &format!("; - {name}\n"),
-                    None => output += "; - Unnamed argument\n",
-                };
-            }
-        }
-
-        output += &format!("{}:\n", self.name_of_func(func_name));
+        let mut b = FuncBuilder::new(func_name, sig);
+        let mut scope = GenScope::new(self, func_name, sig);
 
         // Hack to allow built-ins (inline asm) to work with the existing system :)
-        if let Some(builtin_content) = BUILTIN_FUNCS.get(func_name) {
-            output += builtin_content;
-            return output;
+        if let Some(func) = BUILTIN_FUNCS.get(func_name) {
+            func(&mut b);
+            return format!("{b}");
         }
 
         let Some(Block(statements)) = &func.body else {
             panic!("Function {func:?} left undefined!");
         };
 
-        output += "\tPUSH {R11, LR}\n";
-        output += "\tMOV R11, SP\n";
-
-        let mut scope = GenScope::new(self, func_name, self.program.get_func_type(func.sig_id));
+        b.push(&[Reg::R11, Reg::Lr]);
+        b.mov(Reg::R11, Reg::Sp);
 
         let body_content = self.generate_block(&mut scope, statements);
 
-        output += "\n\t; # Named Stack Variables\n";
+        b.comment("# Named Stack Variables");
+
         for (name, StackLocal { offset, ctype }) in scope
             .named_vars
             .iter()
             .sorted_by(|&a, &b| a.1.offset.cmp(&b.1.offset))
         {
-            output += &format!("\t; - {ctype:?} {name}: {}\n", stack_offset(*offset));
+            b.comment(format!("- {ctype:?} {name}: {}\n", stack_offset(*offset)));
         }
 
-        output += &format!("\t;\n\t; Stack allocated size = {}\n", scope.stack_top_pos);
+        b.comment("");
+        b.comment(format!("Stack allocated size = {}", scope.stack_top_pos));
 
-        output += &format!("\tSUB SP, SP, #{}\n\n", scope.stack_top_pos);
+        b.sub(Reg::Sp, Reg::Sp, scope.stack_top_pos);
+
         output += &body_content;
-        output += &format!("{}:\n", self.name_of_label(func_name, "done"));
-        output += "\tMOV SP, R11\n";
-        output += "\tPOP {R11, LR}\n";
+
+        b.label("done");
+        b.mov(Reg::Sp, Reg::R11);
+        b.pop(&[Reg::R11, Reg::Lr]);
 
         if !scope.cfunc_type.args.is_empty() {
-            output += &format!(
-                "\tADD SP, SP, #{}\t\t; Eat the caller's args.\n",
+            b.inline_comment("Eat the caller's args.");
+            b.add(
+                Reg::Sp,
+                Reg::Sp,
                 scope
                     .cfunc_type
                     .args
                     .iter()
                     .map(|arg| self.sizeof_ctype(arg.ctype))
-                    .sum::<u32>()
+                    .sum::<u32>() as i32,
             );
         }
 
-        output += "\tRET\n";
+        b.ret();
 
-        output
+        format!("{b}")
     }
 
     fn generate_block(&self, scope: &mut GenScope, statements: &Vec<Statement>) -> String {
@@ -829,6 +858,7 @@ impl Generator {
 }
 
 struct GenScope<'a> {
+    parent: Option<&'a GenScope<'a>>,
     generator: &'a Generator,
     cfunc_name: &'a str,
     cfunc_type: &'a CFuncType,
@@ -840,6 +870,7 @@ struct GenScope<'a> {
 impl<'a> GenScope<'a> {
     pub fn new(generator: &'a Generator, cfunc_name: &'a str, cfunc_type: &'a CFuncType) -> Self {
         Self {
+            parent: None,
             generator,
             cfunc_name,
             cfunc_type,
