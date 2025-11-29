@@ -967,7 +967,7 @@ impl<'a> GenScope<'a> {
                 panic!("Can't get the ctype of the undefined variable `{name}`")
             }
 
-            Expr::Call(call) => CConcreteType::Func(call.sig_id).into(),
+            Expr::Call(call) => CType::AsIs(CConcreteType::Func(call.sig_id)),
 
             Expr::BinaryOp(op, left, right) => match op {
                 BinaryOp::AndThen => self.type_of_expr(&right),
