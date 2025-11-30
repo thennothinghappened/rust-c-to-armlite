@@ -178,6 +178,10 @@ impl<'a> FuncBuilder<'a> {
         self.append(Inst::Ret)
     }
 
+    pub fn build(self) -> String {
+        format!("{self}")
+    }
+
     fn format_label(&self, label: &str) -> String {
         format!("L{label}__{}", self.name)
     }
@@ -202,12 +206,19 @@ impl<'a> Display for FuncBuilder<'a> {
 
         writeln!(f, "{}:", self.format_fn(self.name))?;
 
+        let mut prev_was_comment = false;
         let mut inline_comment: Option<&str> = None;
 
         for inst in &self.instructions {
             match inst {
                 Inst::InlineAsm(asm) => write!(f, "\t{asm}"),
-                Inst::Comment(text) => write!(f, "\t; {}", text.lines().join("\n\t; ")),
+                Inst::Comment(text) => {
+                    if !prev_was_comment {
+                        writeln!(f)?;
+                    }
+
+                    write!(f, "\t; {}", text.lines().join("\n\t; "))
+                }
                 Inst::InlineComment(text) => {
                     inline_comment = Some(text);
                     Ok(())
@@ -233,6 +244,8 @@ impl<'a> Display for FuncBuilder<'a> {
                 Inst::Ret => write!(f, "\tRET"),
                 Inst::Cmp(reg, reg_or_immediate) => write!(f, "\tCMP {reg}, {reg_or_immediate}"),
             }?;
+
+            prev_was_comment = matches!(inst, Inst::Comment(_));
 
             if let Some(text) = inline_comment {
                 write!(f, "\t\t; {text}")?;

@@ -123,6 +123,7 @@ impl Generator {
 
         for (name, func) in self.program.get_defined_functions() {
             output += &self.generate_func(name, func);
+            output += "\n";
         }
 
         for (name, value) in self.constant_strings.borrow().iter() {
@@ -153,7 +154,7 @@ impl Generator {
         // Hack to allow built-ins (inline asm) to work with the existing system :)
         if let Some(func) = BUILTIN_FUNCS.get(func_name) {
             func(&mut b);
-            return format!("{b}");
+            return b.build();
         }
 
         let Some(Block(statements)) = &func.body else {
@@ -201,8 +202,7 @@ impl Generator {
         }
 
         b.ret();
-
-        format!("{b}")
+        b.build()
     }
 
     fn generate_block(&self, scope: &mut GenScope, statements: &Vec<Statement>) -> String {
