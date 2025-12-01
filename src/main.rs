@@ -12,12 +12,11 @@ use codespan_reporting::{
 
 use crate::{lexer::Lexer, parser::Parser};
 
-mod codegen;
-mod context;
-
 #[macro_use]
 mod id_type;
 
+mod codegen;
+mod context;
 mod lexer;
 mod parser;
 mod span;

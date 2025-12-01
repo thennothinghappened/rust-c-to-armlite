@@ -1,8 +1,14 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Add};
 
 use itertools::Itertools;
 
-use crate::parser::program::types::{CFunc, CFuncType};
+use crate::{
+    codegen::{arm::file_builder::StringId, Generator},
+    parser::program::types::{CFunc, CFuncType},
+};
+
+pub(super) mod file_builder;
+pub(super) mod func_builder;
 
 #[derive(Clone)]
 pub(super) enum Inst {
@@ -19,16 +25,44 @@ pub(super) enum Inst {
     LoadB(Reg, Address),
     Push(Vec<Reg>),
     Pop(Vec<Reg>),
-    Xor(Reg, Reg, Reg),
+    BitOr(Reg, Reg, RegOrImmediate),
+    BitAnd(Reg, Reg, RegOrImmediate),
+    BitXor(Reg, Reg, RegOrImmediate),
+    BitShl(Reg, Reg, RegOrImmediate),
+    BitShr(Reg, Reg, RegOrImmediate),
     Call(String),
     Cmp(Reg, RegOrImmediate),
-    B(String),
-    BNe(String),
-    BEq(String),
-    BLt(String),
-    BGt(String),
-    BExternal(String),
+    B(BranchTarget),
+    BNe(BranchTarget),
+    BEq(BranchTarget),
+    BLt(BranchTarget),
+    BGt(BranchTarget),
     Ret,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(super) enum BranchTarget {
+    Label(String),
+    Relative(i32),
+    ExternalLabel(String),
+}
+
+impl From<String> for BranchTarget {
+    fn from(value: String) -> Self {
+        BranchTarget::Label(value)
+    }
+}
+
+impl From<&str> for BranchTarget {
+    fn from(value: &str) -> Self {
+        BranchTarget::Label(value.to_owned())
+    }
+}
+
+impl From<i32> for BranchTarget {
+    fn from(value: i32) -> Self {
+        BranchTarget::Relative(value)
+    }
 }
 
 #[derive(Clone)]
@@ -45,6 +79,30 @@ impl Address {
             offset: RegOrImmediate::Imm(0),
             negate_offset: false,
         }
+    }
+
+    pub fn relative(base: Reg, offset: impl Into<RegOrImmediate>) -> Self {
+        Self {
+            base,
+            offset: offset.into(),
+            negate_offset: false,
+        }
+    }
+}
+
+impl Add<i32> for Reg {
+    type Output = Address;
+
+    fn add(self, rhs: i32) -> Self::Output {
+        Address::relative(self, rhs)
+    }
+}
+
+impl Add<Self> for Reg {
+    type Output = Address;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Address::relative(self, rhs)
     }
 }
 
@@ -74,189 +132,8 @@ pub(super) enum Reg {
     R14,
     R15,
     Sp,
-    Pc,
-    Lr,
-}
-
-pub(super) struct FuncBuilder<'a> {
-    instructions: Vec<Inst>,
-    sig: &'a CFuncType,
-    name: &'a str,
-}
-
-impl<'a> FuncBuilder<'a> {
-    pub fn new(name: &'a str, sig: &'a CFuncType) -> Self {
-        Self {
-            instructions: Vec::new(),
-            sig,
-            name,
-        }
-    }
-
-    pub fn append(&mut self, inst: Inst) -> &mut Self {
-        self.instructions.push(inst);
-        self
-    }
-
-    pub fn comment(&mut self, comment: impl Into<String>) -> &mut Self {
-        self.append(Inst::Comment(comment.into()))
-    }
-
-    pub fn inline_comment(&mut self, comment: impl Into<String>) -> &mut Self {
-        self.append(Inst::InlineComment(comment.into()))
-    }
-
-    pub fn label(&mut self, name: impl Into<String>) -> &mut Self {
-        self.append(Inst::Label(name.into()))
-    }
-
-    pub fn asm(&mut self, asm: impl Into<String>) -> &mut Self {
-        self.append(Inst::InlineAsm(asm.into()))
-    }
-
-    pub fn push(&mut self, regs: &[Reg]) -> &mut Self {
-        self.append(Inst::Push(regs.into()))
-    }
-
-    pub fn pop(&mut self, regs: &[Reg]) -> &mut Self {
-        self.append(Inst::Pop(regs.into()))
-    }
-
-    pub fn mov(&mut self, dest: Reg, src: impl Into<RegOrImmediate>) -> &mut Self {
-        self.append(Inst::Mov(dest, src.into()))
-    }
-
-    pub fn cmp(&mut self, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
-        self.append(Inst::Cmp(left, right.into()))
-    }
-
-    pub fn ldr(&mut self, dest: Reg, addr: impl Into<Address>) -> &mut Self {
-        self.append(Inst::Load(dest, addr.into()))
-    }
-
-    pub fn str(&mut self, src: Reg, addr: impl Into<Address>) -> &mut Self {
-        self.append(Inst::Store(src, addr.into()))
-    }
-
-    pub fn ldrb(&mut self, dest: Reg, addr: impl Into<Address>) -> &mut Self {
-        self.append(Inst::LoadB(dest, addr.into()))
-    }
-
-    pub fn strb(&mut self, src: Reg, addr: impl Into<Address>) -> &mut Self {
-        self.append(Inst::StoreB(src, addr.into()))
-    }
-
-    pub fn add(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
-        self.append(Inst::Add(dest, left, right.into()))
-    }
-
-    pub fn sub(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
-        self.append(Inst::Sub(dest, left, right.into()))
-    }
-
-    pub fn b(&mut self, name: impl Into<String>) -> &mut Self {
-        self.append(Inst::B(name.into()))
-    }
-
-    pub fn beq(&mut self, name: impl Into<String>) -> &mut Self {
-        self.append(Inst::BEq(name.into()))
-    }
-
-    pub fn bne(&mut self, name: impl Into<String>) -> &mut Self {
-        self.append(Inst::BNe(name.into()))
-    }
-
-    pub fn blt(&mut self, name: impl Into<String>) -> &mut Self {
-        self.append(Inst::BLt(name.into()))
-    }
-
-    pub fn bgt(&mut self, name: impl Into<String>) -> &mut Self {
-        self.append(Inst::BGt(name.into()))
-    }
-
-    pub fn ret(&mut self) -> &mut Self {
-        self.append(Inst::Ret)
-    }
-
-    pub fn build(self) -> String {
-        format!("{self}")
-    }
-
-    fn format_label(&self, label: &str) -> String {
-        format!("L{label}__{}", self.name)
-    }
-
-    fn format_fn(&self, name: &str) -> String {
-        format!("fn_{name}")
-    }
-}
-
-impl<'a> Display for FuncBuilder<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !self.sig.args.is_empty() {
-            writeln!(f, "; # Arguments")?;
-
-            for arg in &self.sig.args {
-                match &arg.name {
-                    Some(name) => writeln!(f, "; - {name}"),
-                    None => writeln!(f, "; - Unnamed argument"),
-                }?;
-            }
-        }
-
-        writeln!(f, "{}:", self.format_fn(self.name))?;
-
-        let mut prev_was_comment = false;
-        let mut inline_comment: Option<&str> = None;
-
-        for inst in &self.instructions {
-            match inst {
-                Inst::InlineAsm(asm) => write!(f, "\t{asm}"),
-                Inst::Comment(text) => {
-                    if !prev_was_comment {
-                        writeln!(f)?;
-                    }
-
-                    write!(f, "\t; {}", text.lines().join("\n\t; "))
-                }
-                Inst::InlineComment(text) => {
-                    inline_comment = Some(text);
-                    Ok(())
-                }
-                Inst::Label(name) => write!(f, "{}:", self.format_label(name)),
-                Inst::Mov(dest, src) => write!(f, "\tMOV {dest}, {src}"),
-                Inst::Add(dest, left, right) => write!(f, "\tADD {dest}, {left}, {right}"),
-                Inst::Sub(dest, left, right) => write!(f, "\tSUB {dest}, {left}, {right}"),
-                Inst::Store(src, address) => write!(f, "\tSTR {src}, {address}"),
-                Inst::Load(dest, address) => write!(f, "\tLDR {dest}, {address}"),
-                Inst::StoreB(src, address) => write!(f, "\tSTRB {src}, {address}"),
-                Inst::LoadB(dest, address) => write!(f, "\tLDRB {dest}, {address}"),
-                Inst::Push(regs) => write!(f, "\tPUSH {{{}}}", regs.iter().join(", ")),
-                Inst::Pop(regs) => write!(f, "\tPOP {{{}}}", regs.iter().join(", ")),
-                Inst::Xor(dest, left, right) => write!(f, "\tEOR {dest}, {left}, {right}"),
-                Inst::Call(name) => write!(f, "\tBL fn_{name}"),
-                Inst::B(name) => write!(f, "\tB {}", self.format_label(name)),
-                Inst::BNe(name) => write!(f, "\tBNE {}", self.format_label(name)),
-                Inst::BEq(name) => write!(f, "\tBEQ {}", self.format_label(name)),
-                Inst::BLt(name) => write!(f, "\tBLT {}", self.format_label(name)),
-                Inst::BGt(name) => write!(f, "\tBGT {}", self.format_label(name)),
-                Inst::BExternal(name) => write!(f, "\tB {name}"),
-                Inst::Ret => write!(f, "\tRET"),
-                Inst::Cmp(reg, reg_or_immediate) => write!(f, "\tCMP {reg}, {reg_or_immediate}"),
-            }?;
-
-            prev_was_comment = matches!(inst, Inst::Comment(_));
-
-            if let Some(text) = inline_comment {
-                write!(f, "\t\t; {text}")?;
-                inline_comment = None;
-            }
-
-            writeln!(f)?;
-        }
-
-        Ok(())
-    }
+    ProgCounter,
+    LinkReg,
 }
 
 impl Display for Address {
@@ -297,6 +174,24 @@ impl From<i32> for RegOrImmediate {
     }
 }
 
+impl From<u32> for RegOrImmediate {
+    fn from(value: u32) -> Self {
+        RegOrImmediate::Imm(value as i32)
+    }
+}
+
+impl From<String> for RegOrImmediate {
+    fn from(value: String) -> Self {
+        RegOrImmediate::Label(value)
+    }
+}
+
+impl From<StringId> for RegOrImmediate {
+    fn from(value: StringId) -> Self {
+        RegOrImmediate::Label(format!("{value}"))
+    }
+}
+
 impl Display for Reg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -317,8 +212,8 @@ impl Display for Reg {
             Reg::R14 => write!(f, "R14"),
             Reg::R15 => write!(f, "R15"),
             Reg::Sp => write!(f, "SP"),
-            Reg::Pc => write!(f, "PC"),
-            Reg::Lr => write!(f, "LR"),
+            Reg::ProgCounter => write!(f, "PC"),
+            Reg::LinkReg => write!(f, "LR"),
         }
     }
 }

@@ -12,7 +12,10 @@ use itertools::Itertools;
 use phf::phf_map;
 
 use crate::{
-    codegen::arm::{FuncBuilder, Inst, Reg},
+    codegen::{
+        arm::{file_builder::FileBuilder, func_builder, Address, Inst, Reg, RegOrImmediate},
+        func_builder::FuncBuilder,
+    },
     context::Context,
     parser::{
         program::{
@@ -26,37 +29,6 @@ use crate::{
 };
 
 mod arm;
-
-const PRELUDE: &str = r#"
-; ==================================================================================================
-; C RUNTIME PRELUDE
-; ==================================================================================================
-
-c_entry:
-	BL fn_main
-	MOV R4, R0						; Grab the return code.
-
-	MOV R0, #const_c_entry_exitcode_msg_start
-	PUSH {R0}
-	BL fn_WriteString
-
-	PUSH {R4}
-	BL fn_WriteSignedNum
-
-	MOV R0, #const_c_entry_exitcode_msg_end
-	PUSH {R0}
-	BL fn_WriteString
-c_halt:
-	HLT
-	B c_halt
-
-const_c_entry_exitcode_msg_start:	.ASCIZ "\nProgram exited with code "
-const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
-
-; ==================================================================================================
-; END OF PRELUDE
-; ==================================================================================================
-"#;
 
 static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
     "WriteChar" => |b| {
@@ -94,17 +66,16 @@ static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
 
         b.cmp(Reg::R2, 0);
         b.beq("if_false");
-        b.mov(Reg::Pc, Reg::R1);
+        b.mov(Reg::ProgCounter, Reg::R1);
 
         b.label("if_false");
-        b.mov(Reg::Pc, Reg::R0);
+        b.mov(Reg::ProgCounter, Reg::R0);
     },
 };
 
 pub struct Generator {
     program: Program,
-    constant_strings: RefCell<HashMap<String, String>>,
-    next_anon_id: Cell<usize>,
+    file_builder: FileBuilder,
     ctype_size_cache: RefCell<HashMap<CType, u32>>,
 }
 
@@ -112,80 +83,59 @@ impl Generator {
     pub fn new(program: Program) -> Self {
         Self {
             program,
-            next_anon_id: 0.into(),
-            constant_strings: HashMap::default().into(),
+            file_builder: FileBuilder::default(),
             ctype_size_cache: HashMap::default().into(),
         }
     }
 
     pub fn generate(self) -> String {
-        let mut output = PRELUDE.to_owned();
+        for (name, cfunc) in self.program.get_defined_functions() {
+            let sig = self.program.get_func_type(cfunc.sig_id);
 
-        for (name, func) in self.program.get_defined_functions() {
-            output += &self.generate_func(name, func);
-            output += "\n";
+            self.file_builder.create_function(name, sig, |b| {
+                // Hack to allow built-ins (inline asm) to work with the existing system :)
+                if let Some(func) = BUILTIN_FUNCS.get(name) {
+                    return func(b);
+                }
+
+                self.generate_func(b, cfunc)
+            });
         }
 
-        for (name, value) in self.constant_strings.borrow().iter() {
-            output += &format!("{name}: .ASCIZ \"{value}\"\n",);
-        }
-
-        output += "\n.DATA\n";
-
-        for (name, (ctype, value)) in self.program.get_global_vars() {
-            output += &format!("var_{name}: .BLOCK {}", self.sizeof_ctype(*ctype));
-        }
-
-        if !output.ends_with('\n') {
-            output += "\n";
-        }
-
-        output
+        self.file_builder.build()
     }
 
-    fn generate_func(&self, func_name: &str, func: &CFunc) -> String {
-        let mut output = String::new();
-        output += "\n";
+    fn generate_func(&self, b: &mut FuncBuilder, cfunc: &CFunc) {
+        let mut scope = GenScope::new(self, b.sig);
 
-        let sig = self.program.get_func_type(func.sig_id);
-        let mut b = FuncBuilder::new(func_name, sig);
-        let mut scope = GenScope::new(self, func_name, sig);
-
-        // Hack to allow built-ins (inline asm) to work with the existing system :)
-        if let Some(func) = BUILTIN_FUNCS.get(func_name) {
-            func(&mut b);
-            return b.build();
-        }
-
-        let Some(Block(statements)) = &func.body else {
-            panic!("Function {func:?} left undefined!");
+        let Some(Block(statements)) = &cfunc.body else {
+            panic!("Function {cfunc:?} left undefined!");
         };
 
-        b.push(&[Reg::R11, Reg::Lr]);
+        b.push(&[Reg::R11, Reg::LinkReg]);
         b.mov(Reg::R11, Reg::Sp);
 
-        let body_content = self.generate_block(&mut scope, statements);
+        self.generate_block(b, &mut scope, statements);
 
-        b.comment("# Named Stack Variables");
+        // b.comment("# Named Stack Variables");
 
-        for (name, StackLocal { offset, ctype }) in scope
-            .named_vars
-            .iter()
-            .sorted_by(|&a, &b| a.1.offset.cmp(&b.1.offset))
-        {
-            b.comment(format!("- {ctype:?} {name}: {}\n", stack_offset(*offset)));
-        }
+        // for (name, StackLocal { offset, ctype }) in scope
+        //     .named_vars
+        //     .iter()
+        //     .sorted_by(|&a, &b| a.1.offset.cmp(&b.1.offset))
+        // {
+        //     b.comment(format!("- {ctype:?} {name}: {}\n", stack_offset(*offset)));
+        // }
 
-        b.comment("");
-        b.comment(format!("Stack allocated size = {}", scope.stack_top_pos));
+        // b.comment("");
+        // b.comment(format!("Stack allocated size = {}", scope.stack_top_pos));
+        // b.sub(Reg::Sp, Reg::Sp, scope.stack_top_pos);
 
-        b.sub(Reg::Sp, Reg::Sp, scope.stack_top_pos);
-
-        output += &body_content;
+        // output += &body_content;
 
         b.label("done");
         b.mov(Reg::Sp, Reg::R11);
-        b.pop(&[Reg::R11, Reg::Lr]);
+        b.pop(&[Reg::R11, Reg::LinkReg]);
 
         if !scope.cfunc_type.args.is_empty() {
             b.inline_comment("Eat the caller's args.");
@@ -202,44 +152,42 @@ impl Generator {
         }
 
         b.ret();
-        b.build()
     }
 
-    fn generate_block(&self, scope: &mut GenScope, statements: &Vec<Statement>) -> String {
-        let mut out = String::new();
-
+    fn generate_block(
+        &self,
+        b: &mut FuncBuilder,
+        scope: &mut GenScope,
+        statements: &Vec<Statement>,
+    ) {
         for stmt in statements {
-            out += &self.generate_stmt(scope, stmt);
+            self.generate_stmt(b, scope, stmt);
         }
-
-        out
     }
 
-    fn generate_stmt(&self, scope: &mut GenScope, stmt: &Statement) -> String {
-        let mut out = String::new();
-
+    fn generate_stmt(&self, b: &mut FuncBuilder, scope: &mut GenScope, stmt: &Statement) {
         match stmt {
             Statement::Declare(variable) => {
                 let variable_offset = scope.allocate_var(variable.name.clone(), variable.ctype);
 
                 if let Some(expr) = &variable.value {
                     // eval the initial val.
-                    out +=
-                        &self.generate_expr(scope, expr, Some((variable_offset, variable.ctype)));
+                    self.generate_expr(b, scope, expr, Some((variable_offset, variable.ctype)));
                 }
             }
 
             Statement::Expr(expr) => {
-                out += &self.generate_expr(scope, expr, None);
+                self.generate_expr(b, scope, expr, None);
             }
 
             Statement::Return(expr) => {
                 let return_type_size = self.sizeof_ctype(scope.cfunc_type.returns);
                 let temp_storage = scope.allocate_anon(return_type_size);
 
-                out += "\t; <return>\n";
+                b.comment("<return>");
 
-                out += &self.generate_expr(
+                self.generate_expr(
+                    b,
                     scope,
                     expr,
                     Some((temp_storage, scope.cfunc_type.returns)),
@@ -249,25 +197,22 @@ impl Generator {
                     // the caller pushes an address where they want us to copy the returned
                     // (presumably) struct to to return it to them, rather than splitting it
                     // across registers or something.
-                    out += "\tLDR R0, [R11+#4]\t\t; Grab the return storage address.\n";
-                    out += &format!("\tLDR R1, {}\n", stack_offset(temp_storage));
-                    out += "\tSTR R1, [R0]\n";
+                    b.inline_comment("Grab the return storage address.");
+                    b.ldr(Reg::R0, stack_offset(4));
+                    b.ldr(Reg::R1, stack_offset(temp_storage));
+                    b.str(Reg::R1, Address::at(Reg::R0));
                 } else {
                     // we can neatly return the value in one register. yay!
-                    out += &format!(
-                        "\tLDR R0, {}\t\t; Put the returned value in R0.\n",
-                        stack_offset(temp_storage)
-                    );
+                    b.inline_comment("Put the returned value in R0.");
+                    b.ldr(Reg::R0, stack_offset(temp_storage));
                 }
 
                 scope.forget(temp_storage);
 
-                out += &format!(
-                    "\tB {}\t\t; Perform the cleanup.\n",
-                    self.name_of_label(scope.cfunc_name, "done")
-                );
+                b.inline_comment("Perform the cleanup.");
+                b.b("done");
 
-                out += "\t; </return>\n\n";
+                b.comment("</return>");
             }
 
             Statement::If {
@@ -275,13 +220,14 @@ impl Generator {
                 if_true,
                 if_false,
             } => {
-                let if_false_label = self.name_of_label(scope.cfunc_name, &self.next_anon_id());
-                let done_label = self.name_of_label(scope.cfunc_name, &self.next_anon_id());
+                let if_false_label = b.anonymise("If__else");
+                let done_label = b.anonymise("If__done");
+
+                b.comment(format!("if ({condition})"));
+
                 let temp_condition_storage = scope.allocate_anon(4);
-
-                out += &format!("\t; if ({condition})\n");
-
-                out += &self.generate_expr(
+                self.generate_expr(
+                    b,
                     scope,
                     condition,
                     Some((
@@ -290,94 +236,89 @@ impl Generator {
                     )),
                 );
 
-                out += &format!("\tLDR R0, {}\n", stack_offset(temp_condition_storage));
+                b.ldr(Reg::R0, stack_offset(temp_condition_storage));
                 scope.forget(temp_condition_storage);
 
-                out += "\tCMP R0, #0\n";
+                b.cmp(Reg::R0, 0);
 
                 if if_false.is_some() {
-                    out += &format!("\tBEQ {if_false_label}\n");
+                    b.beq(if_false_label.clone());
                 } else {
-                    out += &format!("\tBEQ {done_label}\n");
+                    b.beq(done_label.clone());
                 }
 
-                out += "\t; then\n";
-                out += &self.generate_stmt(scope, if_true);
+                b.comment("then");
+                self.generate_stmt(b, scope, if_true);
 
                 if let Some(if_false) = if_false {
-                    out += &format!("\tB {done_label}\n");
+                    b.b(done_label.clone());
 
-                    out += "\t; else\n";
-                    out += &format!("{if_false_label}:\n");
-                    out += &self.generate_stmt(scope, if_false);
+                    b.comment("else");
+                    b.label(if_false_label);
+                    self.generate_stmt(b, scope, if_false);
                 }
 
-                out += &format!("\t; endif ({condition})\n");
-                out += &format!("{done_label}:\n");
+                b.comment(format!("endif ({condition})"));
+                b.label(done_label);
             }
 
-            Statement::Block(Block(stmts)) => out += &self.generate_block(scope, stmts),
+            Statement::Block(Block(stmts)) => self.generate_block(b, scope, stmts),
 
-            _ => out += &format!("\tUnhandled statement: {stmt:?}\n"),
+            _ => {
+                b.asm(format!("\tUnhandled statement: {stmt:?}\n"));
+            }
         };
-
-        out
     }
 
     /// Generate instructions to perform the given operation, returning the instructions required to
     /// perform it, and place the output at `[R11-#result_offset]`.
-    fn generate_expr<'a>(
+    fn generate_expr(
         &self,
+        b: &mut FuncBuilder,
         scope: &mut GenScope,
-        expr: &'a Expr,
+        expr: &Expr,
         result_info: Option<(i32, CType)>,
-    ) -> String {
-        let mut out = String::new();
-
+    ) {
         match expr {
             Expr::StringLiteral(value) => {
                 let Some((result_offset, ctype)) = result_info else {
                     // pointless no-op.
-                    return out;
+                    return;
                 };
 
-                let anon_name = format!("str_{}", self.next_anon_id());
+                let string_id = self.file_builder.create_string(value);
 
-                out += &format!("\tMOV R0, #{anon_name}\n");
-                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
-
-                self.constant_strings
-                    .borrow_mut()
-                    .insert(anon_name, value.clone());
+                b.mov(Reg::R0, string_id);
+                b.str(Reg::R0, stack_offset(result_offset));
             }
 
             Expr::IntLiteral(value) => {
                 let Some((result_offset, ctype)) = result_info else {
                     // pointless no-op.
-                    return out;
+                    return;
                 };
 
                 // ints are nice and relaxed :)
-                out += &format!("\tMOV R0, #{value}\n");
-                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                b.mov(Reg::R0, *value);
+                b.str(Reg::R0, stack_offset(result_offset));
             }
 
             Expr::Reference(name) => {
                 let Some((result_offset, ctype)) = result_info else {
                     // pointless no-op.
-                    return out;
+                    return;
                 };
 
                 if let Some(source) = scope.get_localvar(name) {
-                    out += &format!(
-                        "\t; === query localvar `{name}` ({:?}) as a {:?} ===\n",
+                    b.comment(format!(
+                        "=== query localvar `{name}` ({:?}) as a {:?} ===",
                         source.ctype, ctype
-                    );
+                    ));
 
                     match source.ctype {
                         CType::AsIs(cconcrete_type) => {
-                            out += &format!("\tLDR R0, {}\n", stack_offset(source.offset));
-                            out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                            b.ldr(Reg::R0, source);
+                            b.str(Reg::R0, stack_offset(result_offset));
                         }
 
                         CType::PointerTo(ctype_id) => match ctype {
@@ -385,9 +326,9 @@ impl Generator {
                                 panic!("can't cast a pointer to a value type")
                             }
 
-                            CType::PointerTo(ctype_id) => {
-                                out += &format!("\tLDR R0, {}\n", stack_offset(source.offset));
-                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                            CType::PointerTo(_) => {
+                                b.ldr(Reg::R0, source);
+                                b.str(Reg::R0, stack_offset(result_offset));
                             }
 
                             CType::ArrayOf(ctype_id, size) => todo!("load array from pointer"),
@@ -399,8 +340,8 @@ impl Generator {
                             }
 
                             CType::PointerTo(ctype_id) => {
-                                out += &format!("\tSUB R0, R11, #{}\n", source.offset);
-                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                b.sub(Reg::R0, Reg::R11, source.offset);
+                                b.str(Reg::R0, stack_offset(result_offset));
                             }
 
                             CType::ArrayOf(ctype_id, _) => {
@@ -409,16 +350,15 @@ impl Generator {
                         },
                     }
 
-                    out += &format!("\t; === done query `{name}` ===\n\n");
-
-                    return out;
+                    b.comment("=== done query `{name}` ===");
+                    return;
                 }
 
                 if let Some(symbol) = self.program.get_symbol(name) {
-                    match symbol {
+                    return match symbol {
                         Symbol::Func(cfunc) => {
-                            out += &format!("\tMOV R0, #fn_{name}\n");
-                            out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                            b.mov(Reg::R0, format!("fn_{name}"));
+                            b.str(Reg::R0, stack_offset(result_offset));
                         }
 
                         Symbol::Var(var_ctype, _) => {
@@ -429,8 +369,9 @@ impl Generator {
                                 // *any* types, and use it instead rather than bespoke solutions
                                 // everywhere for every single operation.
                                 CType::AsIs(cconcrete_type) => {
-                                    out += &format!("\tLDR R0, #var_{name}\n");
-                                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                    b.mov(Reg::R0, format!("var_{name}"));
+                                    b.ldr(Reg::R0, Reg::R0 + 0);
+                                    b.str(Reg::R0, stack_offset(result_offset));
                                 }
 
                                 CType::PointerTo(ctype_id) => match ctype {
@@ -439,9 +380,9 @@ impl Generator {
                                     }
 
                                     CType::PointerTo(ctype_id) => {
-                                        out += &format!("\tLDR R0, #var_{name}\n");
-                                        out +=
-                                            &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                        b.mov(Reg::R0, format!("var_{name}"));
+                                        b.ldr(Reg::R0, Reg::R0 + 0);
+                                        b.str(Reg::R0, stack_offset(result_offset));
                                     }
 
                                     CType::ArrayOf(ctype_id, size) => {
@@ -455,9 +396,9 @@ impl Generator {
                                     }
 
                                     CType::PointerTo(ctype_id) => {
-                                        out += &format!("\tMOV R0, #var_{name}\n");
-                                        out +=
-                                            &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                        b.mov(Reg::R0, format!("var_{name}"));
+                                        b.ldr(Reg::R0, Reg::R0 + 0);
+                                        b.str(Reg::R0, stack_offset(result_offset));
                                     }
 
                                     CType::ArrayOf(ctype_id, _) => {
@@ -467,8 +408,6 @@ impl Generator {
                             }
                         }
                     };
-
-                    return out;
                 }
 
                 panic!("Reference to undefined variable `{name}`");
@@ -506,22 +445,23 @@ impl Generator {
                 let new_frame_top = scope.stack_top_pos;
                 let stack_pointer_adjustment = new_frame_top - initial_frame_top;
 
-                out += &format!(
-                    "\n\t; === Call {target}({}) [{stack_pointer_adjustment} arg bytes] ===\n",
+                b.comment(format!(
+                    "=== Call {target}({}) [{stack_pointer_adjustment} arg bytes] ===",
                     args.iter().join(", ")
-                );
+                ));
 
-                out += &format!("\tSUB SP, SP, #{stack_pointer_adjustment}\t\t\t; Adjust SP to point at 1st call argument!\n");
+                b.inline_comment("Adjust SP to point at 1st call argument!");
+                b.sub(Reg::Sp, Reg::Sp, stack_pointer_adjustment);
 
                 for (arg, out_info) in args.iter().zip(&arg_target_spots) {
-                    out += &self.generate_expr(scope, arg, Some(*out_info));
+                    self.generate_expr(b, scope, arg, Some(*out_info));
                 }
 
                 match &**target {
-                    Expr::Reference(name) => {
+                    Expr::Reference(name) if scope.get_localvar(name).is_none() => {
                         // Direct reference to a function by name. sane common case! we can just BL
                         // there using its label name.
-                        out += &format!("\tBL fn_{name}\n");
+                        b.call(name);
                     }
 
                     expr => {
@@ -529,16 +469,19 @@ impl Generator {
                         let temp_fn_ptr_var = scope.allocate_anon(Self::WORD_SIZE.into());
 
                         // Resolve the function pointer.
-                        out += &self.generate_expr(
+                        self.generate_expr(
+                            b,
                             scope,
                             expr,
                             Some((temp_fn_ptr_var, CType::AsIs(CConcreteType::Func(*sig_id)))),
                         );
 
-                        out += "\tMOV LR, PC\t\t; Manually set LR (TODO: shouldn't this be +4??)\n";
-                        out += &format!("\tLDR PC, {}\n", stack_offset(temp_fn_ptr_var));
-
+                        b.ldr(Reg::R0, stack_offset(temp_fn_ptr_var));
                         scope.forget(temp_fn_ptr_var);
+
+                        b.inline_comment("Manually set LR (TODO: shouldn't this be +4??)");
+                        b.mov(Reg::LinkReg, Reg::ProgCounter);
+                        b.ldr(Reg::ProgCounter, Reg::R0 + 0);
                     }
                 };
 
@@ -547,16 +490,16 @@ impl Generator {
                 }
 
                 let Some((out_pos, out_ctype)) = result_info else {
-                    out += &format!("\t; === END Call {target} => void ===\n\n");
-                    return out;
+                    b.comment(format!("=== END Call {target} => void ==="));
+                    return;
                 };
 
                 if self.sizeof_ctype(sig.returns) <= Self::WORD_SIZE.into() {
-                    out += &format!("\tSTR R0, {}\n", stack_offset(out_pos));
-                    out += &format!(
-                        "\t; === END Call {target} => R0 => {} ===\n\n",
+                    b.str(Reg::R0, stack_offset(out_pos));
+                    b.comment(format!(
+                        "=== END Call {target} => R0 => {} ===",
                         stack_offset(out_pos)
-                    );
+                    ));
                 } else {
                     // no-op, we should've passed this info earlier.
                 }
@@ -565,8 +508,8 @@ impl Generator {
             Expr::BinaryOp(op, left, right) => {
                 match op {
                     BinaryOp::AndThen => {
-                        out += &self.generate_expr(scope, left, None);
-                        out += &self.generate_expr(scope, right, result_info);
+                        self.generate_expr(b, scope, left, None);
+                        self.generate_expr(b, scope, right, result_info);
                     }
 
                     BinaryOp::Assign => todo!(),
@@ -578,13 +521,15 @@ impl Generator {
                         let right_ctype = scope.type_of_expr(right);
                         let right_temp = scope.allocate_anon(self.sizeof_ctype(right_ctype));
 
-                        out += &self.generate_expr(
+                        self.generate_expr(
+                            b,
                             scope,
                             left,
                             Some((left_temp, scope.type_of_expr(left))),
                         );
 
-                        out += &self.generate_expr(
+                        self.generate_expr(
+                            b,
                             scope,
                             right,
                             Some((right_temp, scope.type_of_expr(right))),
@@ -592,20 +537,20 @@ impl Generator {
 
                         let Some((result_offset, ctype)) = result_info else {
                             // discard the result.
-                            return out;
+                            return;
                         };
 
-                        out += &format!("\tLDR R0, {}\n", stack_offset(left_temp));
-                        out += &format!("\tLDR R1, {}\n", stack_offset(right_temp));
+                        b.ldr(Reg::R0, stack_offset(left_temp));
+                        b.ldr(Reg::R1, stack_offset(right_temp));
                         scope.forget(left_temp);
                         scope.forget(right_temp);
-                        out += "\tCMP R0, R1\n";
 
-                        out += "\tBNE .+3\n";
-                        out += "\tMOV R0, #1\n";
-                        out += "\tB .+2\n";
-                        out += "\tMOV R0, #0\n";
-                        out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                        b.cmp(Reg::R0, Reg::R1);
+                        b.bne(3);
+                        b.mov(Reg::R0, 1);
+                        b.b(2);
+                        b.mov(Reg::R0, 0);
+                        b.str(Reg::R0, stack_offset(result_offset));
                     }
 
                     BinaryOp::LessThan => todo!(),
@@ -613,36 +558,36 @@ impl Generator {
                     BinaryOp::Plus => {
                         let Some((result_offset, ctype)) = result_info else {
                             // discard the result.
-                            return out;
+                            return;
                         };
 
                         let ctype_size = self.sizeof_ctype(ctype);
 
-                        out += &format!("\n\t; === binop({left} + {right}) ===\n");
-                        out += &format!("\tSUB SP, SP, #{}\n", ctype_size * 2);
+                        b.comment(format!("=== binop({left} + {right}) ==="));
 
+                        b.sub(Reg::Sp, Reg::Sp, ctype_size * 2);
                         let left_temp = scope.allocate_anon(ctype_size);
                         let right_temp = scope.allocate_anon(ctype_size);
 
-                        out += &self.generate_expr(scope, left, Some((left_temp, ctype)));
-                        out += &self.generate_expr(scope, right, Some((right_temp, ctype)));
-                        out += &format!("\tLDR R0, {}\n", stack_offset(left_temp));
-                        out += &format!("\tLDR R1, {}\n", stack_offset(right_temp));
+                        self.generate_expr(b, scope, left, Some((left_temp, ctype)));
+                        self.generate_expr(b, scope, right, Some((right_temp, ctype)));
+                        b.ldr(Reg::R0, stack_offset(left_temp));
+                        b.ldr(Reg::R1, stack_offset(right_temp));
 
                         scope.forget(left_temp);
                         scope.forget(right_temp);
+                        b.add(Reg::Sp, Reg::Sp, ctype_size * 2);
 
-                        out += &format!("\tADD SP, SP, #{}\n", ctype_size * 2);
+                        b.add(Reg::R0, Reg::R0, Reg::R1);
+                        b.str(Reg::R0, stack_offset(result_offset));
 
-                        out += "\tADD R0, R0, R1\n";
-                        out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
-                        out += &format!("\t; === END binop({left} + {right}) ===\n\n");
+                        b.comment(format!("=== END binop({left} + {right}) ==="));
                     }
 
                     BinaryOp::ArrayIndex => {
                         let Some((result_offset, ctype)) = result_info else {
                             // pointless no-op.
-                            return out;
+                            return;
                         };
 
                         let element_ctype = scope.type_of_expr(expr);
@@ -651,7 +596,8 @@ impl Generator {
                         let temp_index_storage = scope.allocate_anon(Self::WORD_SIZE as u32);
                         let temp_ptr_storage = scope.allocate_anon(Self::WORD_SIZE as u32);
 
-                        out += &self.generate_expr(
+                        self.generate_expr(
+                            b,
                             scope,
                             right,
                             Some((
@@ -660,7 +606,8 @@ impl Generator {
                             )),
                         );
 
-                        out += &self.generate_expr(
+                        self.generate_expr(
+                            b,
                             scope,
                             left,
                             Some((
@@ -674,55 +621,50 @@ impl Generator {
 
                         let result_size = self.sizeof_ctype(ctype);
 
+                        b.ldr(Reg::R0, stack_offset(temp_ptr_storage));
+                        b.ldr(Reg::R1, stack_offset(temp_index_storage));
+
                         match element_size {
                             1 => {
-                                out += &format!("\tLDR R0, {}\n", stack_offset(temp_ptr_storage));
-                                out += &format!("\tLDR R1, {}\n", stack_offset(temp_index_storage));
-                                out += "\tLDRB R0, [R0+R1]\n";
+                                b.ldrb(Reg::R1, Address::relative(Reg::R0, Reg::R1));
 
                                 if result_size == 1 {
-                                    out += &format!("\tSTRB R0, {}\n", stack_offset(result_offset));
+                                    b.strb(Reg::R0, stack_offset(result_offset));
                                 } else {
-                                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                    b.str(Reg::R0, stack_offset(result_offset));
                                 }
                             }
 
                             2 => {
                                 // FIXME: I'm probably doing this big-endian by accident!!
-                                out += &format!("\tLDR R0, {}\n", stack_offset(temp_ptr_storage));
-                                out += &format!("\tLDR R1, {}\n", stack_offset(temp_index_storage));
-                                out += "\tLSL R2, R1, #1\n";
-                                out += "\tADD R2, R0, R2\n";
-                                out += "\tLDRB R0, [R2]\n";
-                                out += "\tLDRB R1, [R2+#1]\n";
-                                out += "\tLSL R0, R0, #8\n";
-                                out += "\tAND R0, R0, R1\n";
-                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                b.shl(Reg::R2, Reg::R1, 1);
+                                b.add(Reg::R2, Reg::R0, Reg::R2);
+                                b.ldrb(Reg::R0, Reg::R2 + 0);
+                                b.ldrb(Reg::R1, Reg::R2 + 1);
+                                b.shl(Reg::R0, Reg::R0, 8);
+                                b.or(Reg::R0, Reg::R0, Reg::R1);
+                                b.str(Reg::R0, stack_offset(result_offset));
                             }
 
                             3 => {
                                 // FIXME: I'm probably doing this big-endian by accident!!
-                                out += &format!("\tLDR R0, {}\n", stack_offset(temp_ptr_storage));
-                                out += &format!("\tLDR R1, {}\n", stack_offset(temp_index_storage));
-                                out += "\tLSL R2, R1, #1\n";
-                                out += "\tADD R2, R2, R1\n";
-                                out += "\tADD R2, R0, R2\n";
-                                out += "\tLDRB R0, [R2]\n";
-                                out += "\tLDRB R1, [R2+#1]\n";
-                                out += "\tLSL R0, R0, #8\n";
-                                out += "\tAND R0, R0, R1\n";
-                                out += "\tLDRB R1, [R2+#2]\n";
-                                out += "\tLSL R0, R0, #8\n";
-                                out += "\tAND R0, R0, R1\n";
-                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                b.shl(Reg::R2, Reg::R1, 1);
+                                b.add(Reg::R2, Reg::R2, Reg::R1);
+                                b.add(Reg::R2, Reg::R0, Reg::R2);
+                                b.ldrb(Reg::R0, Reg::R2 + 0);
+                                b.ldrb(Reg::R1, Reg::R2 + 1);
+                                b.shl(Reg::R0, Reg::R0, 8);
+                                b.or(Reg::R0, Reg::R0, Reg::R1);
+                                b.ldrb(Reg::R1, Reg::R2 + 2);
+                                b.shl(Reg::R0, Reg::R0, 8);
+                                b.or(Reg::R0, Reg::R0, Reg::R1);
+                                b.str(Reg::R0, stack_offset(result_offset));
                             }
 
                             4 => {
-                                out += &format!("\tLDR R0, {}\n", stack_offset(temp_ptr_storage));
-                                out += &format!("\tLDR R1, {}\n", stack_offset(temp_index_storage));
-                                out += "\tLSL R1, R1, #2\n";
-                                out += "\tLDR R0, [R0+R1]\n";
-                                out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                                b.shl(Reg::R1, Reg::R1, 2);
+                                b.ldr(Reg::R0, Reg::R0 + Reg::R1);
+                                b.str(Reg::R0, stack_offset(result_offset));
                             }
 
                             _ => todo!(
@@ -745,28 +687,24 @@ impl Generator {
                 UnaryOp::SizeOf => {
                     let Some((result_offset, ctype)) = result_info else {
                         // pointless no-op.
-                        return out;
+                        return;
                     };
 
-                    out += &format!(
-                        "\tMOV R0, #{}\n",
-                        self.sizeof_ctype(scope.type_of_expr(expr))
-                    );
-
-                    out += &format!("\tSTR R0, {}\n", stack_offset(result_offset))
+                    b.mov(Reg::R0, self.sizeof_ctype(scope.type_of_expr(expr)) as i32);
+                    b.str(Reg::R0, stack_offset(result_offset));
                 }
 
                 UnaryOp::BooleanNot => {
-                    out += &self.generate_expr(scope, expr, result_info);
+                    self.generate_expr(b, scope, expr, result_info);
 
                     if let Some((result_offset, ctype)) = result_info {
-                        out += &format!("\tLDR R0, {}\n", stack_offset(result_offset));
-                        out += "\tCMP R0, #0\n";
-                        out += "\tBNE .+3\n";
-                        out += "\tMOV R0, #1\n";
-                        out += "\tB .+2\n";
-                        out += "\tMOV R0, #0\n";
-                        out += &format!("\tSTR R0, {}\n", stack_offset(result_offset));
+                        b.ldr(Reg::R0, stack_offset(result_offset));
+                        b.cmp(Reg::R0, 0);
+                        b.bne(3);
+                        b.mov(Reg::R0, 1);
+                        b.b(2);
+                        b.mov(Reg::R0, 0);
+                        b.str(Reg::R0, stack_offset(result_offset));
                     }
                 }
 
@@ -776,28 +714,7 @@ impl Generator {
             },
 
             Expr::Cast(expr, _) => todo!(),
-        };
-
-        out
-    }
-
-    fn name_of_func(&self, name: &str) -> String {
-        format!("fn_{name}")
-    }
-
-    fn name_of_label(&self, func_name: &str, label_name: &str) -> String {
-        format!("L{label_name}__{}", self.name_of_func(func_name))
-    }
-
-    fn name_of_constant(&self, name: &str) -> String {
-        format!("const_{name}")
-    }
-
-    fn next_anon_id(&self) -> String {
-        let id = self.next_anon_id.get();
-        self.next_anon_id.update(|next_id| next_id + 1);
-
-        id.to_string()
+        }
     }
 
     const WORD_SIZE: u16 = 4;
@@ -858,9 +775,7 @@ impl Generator {
 }
 
 struct GenScope<'a> {
-    parent: Option<&'a GenScope<'a>>,
     generator: &'a Generator,
-    cfunc_name: &'a str,
     cfunc_type: &'a CFuncType,
     stack_top_pos: i32,
     named_vars: HashMap<String, StackLocal>,
@@ -868,11 +783,9 @@ struct GenScope<'a> {
 }
 
 impl<'a> GenScope<'a> {
-    pub fn new(generator: &'a Generator, cfunc_name: &'a str, cfunc_type: &'a CFuncType) -> Self {
+    pub fn new(generator: &'a Generator, cfunc_type: &'a CFuncType) -> Self {
         Self {
-            parent: None,
             generator,
-            cfunc_name,
             cfunc_type,
             stack_top_pos: 0,
             named_vars: HashMap::default(),
@@ -1047,10 +960,16 @@ struct StackLocal {
     ctype: CType,
 }
 
-fn stack_offset(offset: i32) -> String {
-    format!(
-        "[R11{}#{}]",
-        if offset >= 0 { '-' } else { '+' },
-        offset.abs()
-    )
+impl From<StackLocal> for Address {
+    fn from(value: StackLocal) -> Self {
+        stack_offset(value.offset)
+    }
+}
+
+fn stack_offset(offset: i32) -> Address {
+    Address {
+        base: Reg::R11,
+        offset: offset.abs().into(),
+        negate_offset: (offset >= 0),
+    }
 }
