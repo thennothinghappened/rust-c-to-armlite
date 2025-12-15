@@ -87,88 +87,6 @@ impl<'a> Lexer<'a> {
         peeked
     }
 
-    pub fn next_if<F>(&mut self, predicate: F) -> Option<Token>
-    where
-        F: FnOnce(TokenKind) -> bool,
-    {
-        let token = self.peek();
-
-        if predicate(token.kind) {
-            return Some(self.next());
-        }
-
-        None
-    }
-
-    pub fn maybe_map_next<F, R>(&mut self, map: F) -> Option<R>
-    where
-        F: FnOnce(TokenKind) -> Option<R>,
-    {
-        let out = map(self.peek().kind);
-
-        if out.is_some() {
-            self.next();
-        }
-
-        out
-    }
-
-    pub fn accept(&mut self, expected: TokenKind) -> bool {
-        self.next_if(|token| token == expected).is_some()
-    }
-
-    pub fn next_is(&mut self, expected: TokenKind) -> bool {
-        self.peek().kind == expected
-    }
-
-    pub fn accept_ident(&mut self) -> Option<String> {
-        if let TokenKind::Ident(id) = self.peek().kind {
-            self.next();
-            return Some(self.context.get_ident(id));
-        }
-
-        None
-    }
-
-    pub fn consume(&mut self) -> Result<Token, LexerError> {
-        let token = self.next();
-
-        if token.kind == TokenKind::Eof {
-            return Err(self.err_here(LexerErrorKind::EarlyEof));
-        }
-
-        Ok(token)
-    }
-
-    pub fn expect(&mut self, expected: TokenKind) -> Result<Span, LexerError> {
-        let token = self.consume()?;
-
-        if token.kind == expected {
-            return Ok(token.span);
-        }
-
-        Err(LexerError {
-            span: token.span,
-            kind: LexerErrorKind::WrongToken {
-                expected,
-                actual: token.kind,
-            },
-        })
-    }
-
-    pub fn consume_ident(&mut self) -> Result<String, LexerError> {
-        let Some(ident) = self.accept_ident() else {
-            let actual = self.peek().kind;
-
-            return Err(self.err_here(LexerErrorKind::WrongToken {
-                expected: TokenKind::Ident(0),
-                actual,
-            }));
-        };
-
-        Ok(ident)
-    }
-
     fn lex_next(&mut self) -> TokenKind {
         let Some(char) = self.peek_char() else {
             return TokenKind::Eof;
@@ -272,7 +190,14 @@ impl<'a> Lexer<'a> {
                     self.context.preproc_define(definition_name, "");
                 }
 
-                _ => panic!("Unknown directive `#{directive}`"),
+                directive => {
+                    // Eat the rest of the line so we can continue.
+                    self.take_chars_until(is_newline);
+
+                    return TokenKind::UnknownPreprocessorDirective(
+                        self.context.allocate_ident(directive),
+                    );
+                }
             }
 
             return TokenKind::DiscardMarker;
@@ -403,7 +328,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn maybe_map_next_char<F, R>(&mut self, map: F) -> Option<R>
+    fn maybe_map_next_char<F, R>(&mut self, map: F) -> Option<R>
     where
         F: FnOnce(char) -> Option<R>,
     {
@@ -411,47 +336,5 @@ impl<'a> Lexer<'a> {
         self.next_char();
 
         Some(out)
-    }
-
-    fn err_here(&self, err: LexerErrorKind) -> LexerError {
-        LexerError {
-            span: self
-                .token_buffer_stream
-                .front()
-                .map(|tk| tk.span)
-                .unwrap_or(Span::at(self.index)),
-            kind: err,
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-#[error("{kind} at {span}")]
-pub struct LexerError {
-    pub span: Span,
-    pub kind: LexerErrorKind,
-}
-
-#[derive(Debug, Error)]
-pub enum LexerErrorKind {
-    #[error("Incorrect token {actual}, expected {expected}")]
-    WrongToken {
-        expected: TokenKind,
-        actual: TokenKind,
-    },
-
-    #[error("Unexpected End Of File")]
-    EarlyEof,
-}
-
-impl LexerError {
-    pub(super) fn wrong_token(expected: TokenKind, actual: Token) -> Self {
-        Self {
-            span: actual.span,
-            kind: LexerErrorKind::WrongToken {
-                expected,
-                actual: actual.kind,
-            },
-        }
     }
 }

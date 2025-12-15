@@ -108,7 +108,7 @@ impl Generator {
     fn generate_func(&self, b: &mut FuncBuilder, cfunc: &CFunc) {
         let mut scope = GenScope::new(self, b.sig);
 
-        let Some(Block(statements)) = &cfunc.body else {
+        let Some(Block { statements, vars }) = &cfunc.body else {
             panic!("Function {cfunc:?} left undefined!");
         };
 
@@ -262,7 +262,9 @@ impl Generator {
                 b.label(done_label);
             }
 
-            Statement::Block(Block(stmts)) => self.generate_block(b, scope, stmts),
+            Statement::Block(Block { statements, vars }) => {
+                self.generate_block(b, scope, statements)
+            }
 
             _ => {
                 b.asm(format!("\tUnhandled statement: {stmt:?}\n"));

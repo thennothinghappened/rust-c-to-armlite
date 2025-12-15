@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::parser::program::{expr::Expr, types::CType};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,7 +23,10 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Block(pub Vec<Statement>);
+pub struct Block {
+    pub statements: Vec<Statement>,
+    pub vars: HashMap<String, CType>,
+}
 
 impl From<Block> for Statement {
     fn from(value: Block) -> Self {

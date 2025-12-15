@@ -1,20 +1,27 @@
 use thiserror::Error;
 
 use crate::{
-    lexer::{tokenkind::TokenKind, Lexer, LexerError, LexerErrorKind, Token},
-    parser::program::{
-        expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
-        statement::{Block, Statement, Variable},
-        types::{CBuiltinType, CConcreteType, CFunc, CFuncType, CStruct, CType, Member, TypeDef},
-        Program, StructBuilder,
+    lexer::{tokenkind::TokenKind, Lexer, Token},
+    parser::{
+        block_builder::BlockBuilder,
+        program::{
+            expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
+            statement::{Block, Statement, Variable},
+            types::{
+                CBuiltinType, CConcreteType, CFunc, CFuncType, CStruct, CType, Member, TypeDef,
+            },
+            Program, StructBuilder,
+        },
     },
     span::Span,
 };
 pub mod program;
 
+mod block_builder;
+mod parser_advancing;
+
 pub enum TodoType {}
 
-#[derive(Clone)]
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     program: program::Program,
@@ -34,9 +41,9 @@ impl<'a> Parser<'a> {
     /// 3. Function declarations (& definitions.)
     pub fn parse(mut self) -> Result<Program, ParseError> {
         loop {
-            match self.lexer.peek().kind {
+            match self.peek().kind {
                 TokenKind::Semicolon => {
-                    self.lexer.next();
+                    self.next();
                 }
 
                 TokenKind::TypeDef => {
@@ -69,14 +76,14 @@ impl<'a> Parser<'a> {
         // function, or a variable...
         let initial_type = self.parse_type()?;
 
-        if self.lexer.accept(TokenKind::Semicolon) {
+        if self.accept(TokenKind::Semicolon) {
             // Lone type definition.
             return Ok(None);
         }
 
         let (name, this_type) = self.parse_variable_name(initial_type)?;
 
-        if self.lexer.next_is(TokenKind::OpenParen) {
+        if self.next_is(TokenKind::OpenParen) {
             // Function declaration!
             let return_ctype = this_type;
 
@@ -97,18 +104,18 @@ impl<'a> Parser<'a> {
                 .unwrap();
 
             // May or may not have function body.
-            if self.lexer.next_is(TokenKind::OpenCurly) {
+            if self.next_is(TokenKind::OpenCurly) {
                 func.body = Some(self.parse_block()?);
                 self.program.declare_function(name, func).unwrap();
             } else {
-                self.lexer.expect(TokenKind::Semicolon)?;
+                self.expect(TokenKind::Semicolon)?;
             };
 
             return Ok(None);
         }
 
         // Global variable decl (optionally with initial value!)
-        let value = if self.lexer.accept(TokenKind::Assign) {
+        let value = if self.accept(TokenKind::Assign) {
             Some(self.parse_expr(1)?)
         } else {
             None
@@ -122,10 +129,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_variable_name(&mut self, initial_type: CType) -> Result<(String, CType), ParseError> {
-        if self.lexer.accept(TokenKind::OpenParen) {
+        if self.accept(TokenKind::OpenParen) {
             let (name, mut this_type) = self.parse_variable_name(initial_type)?;
 
-            if self.lexer.next_is(TokenKind::OpenParen) {
+            if self.next_is(TokenKind::OpenParen) {
                 // function pointer AHHHHHHHHHHHH
                 let CType::PointerTo(return_ctype_id) = this_type else {
                     return self.error("Expecting a pointer when parsing a function type");
@@ -139,26 +146,25 @@ impl<'a> Parser<'a> {
                 })));
             }
 
-            self.lexer.expect(TokenKind::CloseParen)?;
+            self.expect(TokenKind::CloseParen)?;
             return Ok((name, this_type));
         }
 
         let mut this_type = self.parse_type_pointersssss(initial_type)?;
-        let name = self.lexer.consume_ident()?;
+        let name = self.consume_ident()?;
 
-        if self.lexer.accept(TokenKind::OpenSquare) {
+        if self.accept(TokenKind::OpenSquare) {
             let element_count = self
-                .lexer
                 .maybe_map_next(|kind| match kind {
                     TokenKind::IntLiteral(element_count) => Some(element_count),
                     _ => None,
                 })
                 .ok_or_else(|| ParseError {
                     span: Span::at(self.lexer.index),
-                    kind: ParseErrorKind::UnexpectedToken(self.lexer.next().kind),
+                    kind: ParseErrorKind::UnexpectedToken(self.next().kind),
                 })?;
 
-            self.lexer.expect(TokenKind::CloseSquare)?;
+            self.expect(TokenKind::CloseSquare)?;
 
             this_type = CType::ArrayOf(
                 self.program.ctype_id_of(this_type),
@@ -175,7 +181,7 @@ impl<'a> Parser<'a> {
         let mut this_type = initial_type;
 
         // Evil right-associative pointer syntax >:(((
-        while self.lexer.accept(TokenKind::Star) {
+        while self.accept(TokenKind::Star) {
             this_type = CType::PointerTo(self.program.ctype_id_of(this_type)).into();
         }
 
@@ -185,23 +191,23 @@ impl<'a> Parser<'a> {
     fn parse_func_decl_args(&mut self) -> Result<Vec<Member>, ParseError> {
         let mut args: Vec<Member> = Vec::new();
 
-        self.lexer.expect(TokenKind::OpenParen)?;
+        self.expect(TokenKind::OpenParen)?;
 
-        while !self.lexer.accept(TokenKind::CloseParen) {
+        while !self.accept(TokenKind::CloseParen) {
             let initial_type = self.parse_type()?;
             let arg_type = self.parse_type_pointersssss(initial_type)?;
-            let arg_name = self.lexer.accept_ident();
+            let arg_name = self.accept_ident();
 
             args.push(Member {
                 name: arg_name,
                 ctype: arg_type,
             });
 
-            if self.lexer.accept(TokenKind::CloseParen) {
+            if self.accept(TokenKind::CloseParen) {
                 break;
             }
 
-            self.lexer.expect(TokenKind::Comma)?;
+            self.expect(TokenKind::Comma)?;
         }
 
         Ok(args)
@@ -210,33 +216,41 @@ impl<'a> Parser<'a> {
     fn parse_block(&mut self) -> Result<Block, ParseError> {
         let mut statements: Vec<Statement> = Vec::new();
 
-        self.lexer.expect(TokenKind::OpenCurly)?;
+        self.expect(TokenKind::OpenCurly)?;
         self.consume_semicolons();
+
+        let mut block_builder = BlockBuilder::new();
 
         loop {
             self.consume_semicolons();
 
-            if self.lexer.accept(TokenKind::CloseCurly) {
+            if self.accept(TokenKind::CloseCurly) {
                 break;
             }
 
-            statements.push(self.parse_statement()?);
+            statements.push(self.parse_statement(&mut block_builder)?);
         }
 
-        Ok(Block(statements))
+        Ok(Block {
+            statements,
+            vars: block_builder.build(),
+        })
     }
 
-    fn parse_statement(&mut self) -> Result<Statement, ParseError> {
-        match self.lexer.peek().kind {
+    fn parse_statement(
+        &mut self,
+        block_builder: &mut BlockBuilder,
+    ) -> Result<Statement, ParseError> {
+        match self.peek().kind {
             TokenKind::OpenCurly => Ok(self.parse_block()?.into()),
 
             TokenKind::If => {
-                self.lexer.next();
+                self.next();
 
                 let condition = self.parse_expr_in_brackets()?;
-                let if_true = self.parse_statement()?;
+                let if_true = self.parse_statement(block_builder)?;
 
-                if !self.lexer.accept(TokenKind::Else) {
+                if !self.accept(TokenKind::Else) {
                     return Ok(Statement::If {
                         condition: Box::new(condition),
                         if_true: Box::new(if_true),
@@ -244,7 +258,7 @@ impl<'a> Parser<'a> {
                     });
                 };
 
-                let if_false = self.parse_statement()?;
+                let if_false = self.parse_statement(block_builder)?;
 
                 Ok(Statement::If {
                     condition: Box::new(condition),
@@ -254,10 +268,10 @@ impl<'a> Parser<'a> {
             }
 
             TokenKind::While => {
-                self.lexer.next();
+                self.next();
 
                 let condition = self.parse_expr_in_brackets()?;
-                let block = self.parse_statement()?;
+                let block = self.parse_statement(block_builder)?;
 
                 Ok(Statement::While {
                     condition: Box::new(condition),
@@ -266,10 +280,10 @@ impl<'a> Parser<'a> {
             }
 
             TokenKind::Return => {
-                self.lexer.next();
+                self.next();
 
                 let value = self.parse_expr(0)?;
-                self.lexer.expect(TokenKind::Semicolon)?;
+                self.expect(TokenKind::Semicolon)?;
 
                 Ok(Statement::Return(Box::new(value)))
             }
@@ -279,21 +293,19 @@ impl<'a> Parser<'a> {
                 // expression. We'll cheat by spawning two clones of this parser and parsing both
                 // possible interpretations, then picking the one that works.
 
-                let parse_as_variable_result = self.clone().parse_variable_decl();
+                let old_lexer = self.lexer.clone();
+                let parse_as_variable_result = self.parse_variable_decl(block_builder);
 
-                if parse_as_variable_result.is_ok() {
-                    let decl = self.parse_variable_decl().unwrap();
-                    self.lexer.expect(TokenKind::Semicolon)?;
-
+                if let Ok(decl) = parse_as_variable_result {
+                    self.expect(TokenKind::Semicolon)?;
                     return Ok(decl);
                 }
 
-                let parse_as_expr_result = self.clone().parse_expr(0);
+                self.lexer = old_lexer;
+                let parse_as_expr_result = self.parse_expr(0);
 
-                if parse_as_expr_result.is_ok() {
-                    let expr = self.parse_expr(0).unwrap();
-                    self.lexer.expect(TokenKind::Semicolon)?;
-
+                if let Ok(expr) = parse_as_expr_result {
+                    self.expect(TokenKind::Semicolon)?;
                     return Ok(Statement::Expr(expr));
                 }
 
@@ -306,29 +318,34 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_variable_decl(&mut self) -> Result<Statement, ParseError> {
+    fn parse_variable_decl(
+        &mut self,
+        block_builder: &mut BlockBuilder,
+    ) -> Result<Statement, ParseError> {
         let initial_type = self.parse_type()?;
 
         // todo: support multiple decls on same line (ew)
-        let (var_name, var_type) = self.parse_variable_name(initial_type)?;
+        let (var_name, var_ctype) = self.parse_variable_name(initial_type)?;
 
-        let value = if self.lexer.accept(TokenKind::Assign) {
+        let value = if self.accept(TokenKind::Assign) {
             Some(self.parse_expr(1)?)
         } else {
             None
         };
 
+        block_builder.declare_var(var_name.clone(), var_ctype);
+
         Ok(Statement::Declare(Variable {
             name: var_name,
-            ctype: var_type,
+            ctype: var_ctype,
             value,
         }))
     }
 
     fn parse_expr_in_brackets(&mut self) -> Result<Expr, ParseError> {
-        self.lexer.expect(TokenKind::OpenParen)?;
+        self.expect(TokenKind::OpenParen)?;
         let expr = self.parse_expr(0)?;
-        self.lexer.expect(TokenKind::CloseParen)?;
+        self.expect(TokenKind::CloseParen)?;
 
         Ok(expr)
     }
@@ -336,7 +353,7 @@ impl<'a> Parser<'a> {
     fn parse_expr(&mut self, min_power: i32) -> Result<Expr, ParseError> {
         let mut lhs = self.parse_unary_expr()?;
 
-        while let Some(op) = self.lexer.maybe_map_next(|token| {
+        while let Some(op) = self.maybe_map_next(|token| {
             match token {
                 TokenKind::Comma => Some(BinaryOp::AndThen),
                 TokenKind::Assign => Some(BinaryOp::Assign),
@@ -358,14 +375,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unary_expr(&mut self) -> Result<Expr, ParseError> {
-        if self.lexer.next_is(TokenKind::OpenParen) {
-            // rust stop asking me to collapse this pretty pls
-            if self.clone().parse_cast_expr().is_ok() {
-                return self.parse_cast_expr();
+        if self.next_is(TokenKind::OpenParen) {
+            let old_lexer = self.lexer.clone();
+
+            match self.parse_cast_expr() {
+                Ok(expr) => return Ok(expr),
+                Err(_) => {
+                    // Roll back the lexer.
+                    self.lexer = old_lexer;
+                }
             }
         }
 
-        let Some(op) = self.lexer.maybe_map_next(|token| match token {
+        let Some(op) = self.maybe_map_next(|token| match token {
             TokenKind::PlusPlus => Some(UnaryOp::IncrementThenGet),
             TokenKind::MinusMinus => Some(UnaryOp::DecrementThenGet),
             TokenKind::SizeOf => Some(UnaryOp::SizeOf),
@@ -383,17 +405,17 @@ impl<'a> Parser<'a> {
         let mut operand = self.parse_terminal_expr()?;
 
         loop {
-            if self.lexer.accept(TokenKind::OpenParen) {
+            if self.accept(TokenKind::OpenParen) {
                 // Function call args!
                 let mut args: Vec<Expr> = Vec::new();
 
-                while !self.lexer.accept(TokenKind::CloseParen) {
+                while !self.accept(TokenKind::CloseParen) {
                     // Args are not allowed to use the comma operator, since that'd conflict with
                     // comma being the function arg separator.
                     args.push(self.parse_expr(BinaryOp::AndThen.binding_power() + 1)?);
 
-                    if !self.lexer.accept(TokenKind::Comma) {
-                        self.lexer.expect(TokenKind::CloseParen)?;
+                    if !self.accept(TokenKind::Comma) {
+                        self.expect(TokenKind::CloseParen)?;
                         break;
                     }
                 }
@@ -416,7 +438,7 @@ impl<'a> Parser<'a> {
 
             // FIXME: i think currently you can't go like, func()++() tho that seems like nonsense
             // anyway lol
-            if let Some(op) = self.lexer.maybe_map_next(|token| match token {
+            if let Some(op) = self.maybe_map_next(|token| match token {
                 TokenKind::PlusPlus => Some(UnaryOp::GetThenIncrement),
                 TokenKind::MinusMinus => Some(UnaryOp::GetThenDecrement),
                 _ => None,
@@ -425,14 +447,14 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            if self.lexer.accept(TokenKind::OpenSquare) {
+            if self.accept(TokenKind::OpenSquare) {
                 operand = Expr::BinaryOp(
                     BinaryOp::ArrayIndex,
                     Box::new(operand),
                     Box::new(self.parse_expr(0)?),
                 );
 
-                self.lexer.expect(TokenKind::CloseSquare)?;
+                self.expect(TokenKind::CloseSquare)?;
                 continue;
             }
 
@@ -443,29 +465,29 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_cast_expr(&mut self) -> Result<Expr, ParseError> {
-        self.lexer.expect(TokenKind::OpenParen)?;
+        self.expect(TokenKind::OpenParen)?;
         let initial_type = self.parse_type()?;
         let target_type = self.parse_type_pointersssss(initial_type)?;
-        self.lexer.expect(TokenKind::CloseParen)?;
+        self.expect(TokenKind::CloseParen)?;
 
         let expr = self.parse_expr(0)?;
         Ok(Expr::Cast(Box::new(expr), target_type))
     }
 
     fn parse_terminal_expr(&mut self) -> Result<Expr, ParseError> {
-        match self.lexer.peek().kind {
+        match self.peek().kind {
             TokenKind::Ident(id) => {
-                self.lexer.next();
+                self.next();
                 Ok(Expr::Reference(self.lexer.context.get_ident(id)))
             }
 
             TokenKind::StringLiteral(id) => {
-                self.lexer.next();
+                self.next();
                 Ok(Expr::StringLiteral(self.lexer.context.get_ident(id)))
             }
 
             TokenKind::IntLiteral(int) => {
-                self.lexer.next();
+                self.next();
                 Ok(Expr::IntLiteral(int))
             }
 
@@ -476,11 +498,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_typedef(&mut self) -> Result<(), ParseError> {
-        self.lexer.expect(TokenKind::TypeDef)?;
+        self.expect(TokenKind::TypeDef)?;
 
         let initial_type = self.parse_type()?;
         let pointer_type = self.parse_type_pointersssss(initial_type)?;
-        let name = self.lexer.consume_ident()?.to_string();
+        let name = self.consume_ident()?.to_string();
 
         let typedef = TypeDef {
             name,
@@ -491,15 +513,15 @@ impl<'a> Parser<'a> {
             .typedef(typedef)
             .map_err(|err| self.bad_definition(Span::at(0), err))?;
 
-        self.lexer.expect(TokenKind::Semicolon)?;
+        self.expect(TokenKind::Semicolon)?;
         Ok(())
     }
 
     fn parse_struct(&mut self) -> Result<CType, ParseError> {
-        let start = self.lexer.expect(TokenKind::Struct)?;
-        let struct_name = self.lexer.accept_ident();
+        let start = self.expect(TokenKind::Struct)?;
+        let struct_name = self.accept_ident();
 
-        if !self.lexer.accept(TokenKind::OpenCurly) {
+        if !self.accept(TokenKind::OpenCurly) {
             let Some(struct_name) = struct_name else {
                 return Err(self.bad_definition(
                     start.until(self.lexer.index),
@@ -517,13 +539,13 @@ impl<'a> Parser<'a> {
 
         let mut builder = StructBuilder::new();
 
-        while !self.lexer.accept(TokenKind::CloseCurly) {
+        while !self.accept(TokenKind::CloseCurly) {
             // Parse each member!
             let start_pos = self.lexer.index;
 
             let member_type = self.parse_type()?;
             let (member_name, member_type) = self.parse_variable_name(member_type)?;
-            self.lexer.expect(TokenKind::Semicolon)?;
+            self.expect(TokenKind::Semicolon)?;
 
             let end_pos = self.lexer.index;
 
@@ -559,15 +581,18 @@ impl<'a> Parser<'a> {
     /// variable (or what have you), as the "*" part of the type is right-associative *for some
     /// reason*.
     fn parse_type(&mut self) -> Result<CType, ParseError> {
-        match self.lexer.peek().kind {
+        match self.peek().kind {
             // Inline struct type.
             TokenKind::Struct => self.parse_struct(),
 
             // Typedef'd something-or-other!
-            TokenKind::Ident(_) => self
-                .program
-                .resolve_typedef(&self.lexer.consume_ident()?)
-                .ok_or_else(|| self.unexpected_token()),
+            TokenKind::Ident(_) => {
+                let ident = self.consume_ident()?;
+
+                self.program
+                    .resolve_typedef(&ident)
+                    .ok_or_else(|| self.unexpected_token())
+            }
 
             // Maybe we've got a number?
             _ => self
@@ -577,14 +602,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_numeric_type(&mut self) -> Result<CBuiltinType, ParseError> {
-        if self.lexer.accept(TokenKind::Unsigned) {
+        if self.accept(TokenKind::Unsigned) {
             return self
                 .parse_terminal_numeric_type()?
                 .unsigned()
                 .ok_or_else(|| todo!("handle bad numeric unsigned"));
         }
 
-        if self.lexer.accept(TokenKind::Signed) {
+        if self.accept(TokenKind::Signed) {
             return self
                 .parse_terminal_numeric_type()?
                 .signed()
@@ -595,7 +620,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_terminal_numeric_type(&mut self) -> Result<CBuiltinType, ParseError> {
-        if let Some(basic_type) = self.lexer.maybe_map_next(|token| match token {
+        if let Some(basic_type) = self.maybe_map_next(|token| match token {
             TokenKind::Void => Some(CBuiltinType::Void),
             TokenKind::Bool => Some(CBuiltinType::Bool),
             TokenKind::Int => Some(CBuiltinType::Int),
@@ -607,29 +632,29 @@ impl<'a> Parser<'a> {
             return Ok(basic_type);
         }
 
-        if self.lexer.accept(TokenKind::Short) {
-            if self.lexer.accept(TokenKind::Int) {
+        if self.accept(TokenKind::Short) {
+            if self.accept(TokenKind::Int) {
                 return Ok(CBuiltinType::Short);
             }
 
             return Ok(CBuiltinType::Short);
         }
 
-        if self.lexer.accept(TokenKind::Long) {
-            if self.lexer.accept(TokenKind::Long) {
+        if self.accept(TokenKind::Long) {
+            if self.accept(TokenKind::Long) {
                 // long long long long long long long long int!!!!!!!!!
                 // (optional "int" suffix here)
-                self.lexer.accept(TokenKind::Int);
+                self.accept(TokenKind::Int);
 
                 return Ok(CBuiltinType::LongLong);
             }
 
-            if self.lexer.accept(TokenKind::Double) {
+            if self.accept(TokenKind::Double) {
                 return Ok(CBuiltinType::LongDouble);
             }
 
             // again, optional "int".
-            self.lexer.accept(TokenKind::Int);
+            self.accept(TokenKind::Int);
 
             return Ok(CBuiltinType::Long);
         }
@@ -638,7 +663,7 @@ impl<'a> Parser<'a> {
     }
 
     fn consume_semicolons(&mut self) {
-        while self.lexer.accept(TokenKind::Semicolon) {}
+        while self.accept(TokenKind::Semicolon) {}
     }
 
     fn unexpected_eof(&self) -> ParseError {
@@ -649,7 +674,7 @@ impl<'a> Parser<'a> {
     }
 
     fn unexpected_token(&mut self) -> ParseError {
-        let Token { kind, span } = self.lexer.peek();
+        let Token { kind, span } = self.peek();
 
         if kind == TokenKind::Eof {
             return self.unexpected_eof();
@@ -757,26 +782,6 @@ pub enum ParseErrorKind {
     /// kinds when really this project needs a big ol' refactor!!
     #[error("{0}")]
     Lazy(String),
-}
-
-impl<'a> From<LexerError> for ParseError {
-    fn from(value: LexerError) -> Self {
-        Self {
-            span: value.span,
-            kind: value.kind.into(),
-        }
-    }
-}
-
-impl<'a> From<LexerErrorKind> for ParseErrorKind {
-    fn from(value: LexerErrorKind) -> Self {
-        match value {
-            LexerErrorKind::WrongToken { expected, actual } => {
-                ParseErrorKind::WrongToken { expected, actual }
-            }
-            LexerErrorKind::EarlyEof => ParseErrorKind::EarlyEof,
-        }
-    }
 }
 
 impl<'a> From<anyhow::Error> for ParseErrorKind {

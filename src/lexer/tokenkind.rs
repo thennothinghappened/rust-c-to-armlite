@@ -50,6 +50,7 @@ pub(crate) enum TokenKind {
     IntLiteral(i32),
     Ident(IdentId),
     Unknown(char),
+    UnknownPreprocessorDirective(IdentId),
     Eof,
 
     /// Not a real source-code token! This will never be seen by the parser. The lexer uses this
@@ -107,12 +108,10 @@ impl TryFrom<TokenKind> for &'static str {
             TokenKind::Const => "const",
             TokenKind::QuestionMark => "?",
             TokenKind::Colon => ":",
-
             TokenKind::StringLiteral(_) => "string",
             TokenKind::Ident(_) => "identifier",
-
             TokenKind::IntLiteral(_) | TokenKind::Unknown(_) => return Err(()),
-
+            TokenKind::UnknownPreprocessorDirective(_) => return Err(()),
             TokenKind::DiscardMarker => "<<Internal Discard Marker>>",
             TokenKind::Eof => "<<End Of File>>",
         })
