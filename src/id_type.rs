@@ -2,8 +2,14 @@ pub trait GetAndIncrement<T> {
     fn get_and_increment(&self) -> T;
 }
 
+// Note: to get docs working on ID types, grabbed that from here:
+// https://amanjeev.com/blog/rust-document-macro-invocations/
 macro_rules! id_type {
-    ($name: ident) => {
+    (
+        $(#[$meta:meta])*
+        $name: ident
+    ) => {
+        $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub struct $name(u32);
 
