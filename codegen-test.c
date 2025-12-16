@@ -24,7 +24,6 @@ int main()
 size_t StringLength(char* buffer, size_t bufferLength)
 {
 	size_t index = 0;
-	char* blah = "test";
 
 	while (!(index == bufferLength))
 	{
