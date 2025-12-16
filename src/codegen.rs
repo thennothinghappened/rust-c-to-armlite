@@ -98,6 +98,19 @@ impl Generator {
             let sig = self.program.get_func_type(cfunc.sig_id);
 
             self.file_builder.create_function(name, sig, |b| {
+                if !b.sig.args.is_empty() {
+                    b.append_doc_line("# Arguments");
+
+                    for arg in &b.sig.args {
+                        match &arg.name {
+                            Some(name) => b.append_doc_line(format!("- {name} ({:?})", arg.ctype)),
+                            None => {
+                                b.append_doc_line(format!("- Unnamed argument ({:?})", arg.ctype))
+                            }
+                        };
+                    }
+                }
+
                 // Hack to allow built-ins (inline asm) to work with the existing system :)
                 if let Some(func) = BUILTIN_FUNCS.get(name) {
                     return func(b);

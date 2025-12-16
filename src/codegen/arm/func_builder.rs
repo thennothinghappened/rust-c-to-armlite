@@ -21,11 +21,13 @@ pub(crate) struct FuncBuilder<'a> {
     name: &'a str,
     next_anon_label_id: Cell<AnonLabelId>,
     labels: BiMap<LabelId, String>,
+    doc_comment: Vec<String>,
 }
 
 impl<'a> FuncBuilder<'a> {
     pub fn new(name: &'a str, sig: &'a CFuncType) -> Self {
         Self {
+            doc_comment: Vec::new(),
             instructions: Vec::new(),
             sig,
             name,
@@ -40,6 +42,10 @@ impl<'a> FuncBuilder<'a> {
             name.into(),
             self.next_anon_label_id.get_and_increment().0
         )
+    }
+
+    pub fn append_doc_line(&mut self, line: impl Into<String>) {
+        self.doc_comment.push(line.into());
     }
 
     pub fn append(&mut self, inst: Inst) -> &mut Self {
@@ -176,15 +182,8 @@ impl<'a> FuncBuilder<'a> {
 
 impl<'a> Display for FuncBuilder<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !self.sig.args.is_empty() {
-            writeln!(f, "; # Arguments")?;
-
-            for arg in &self.sig.args {
-                match &arg.name {
-                    Some(name) => writeln!(f, "; - {name}"),
-                    None => writeln!(f, "; - Unnamed argument"),
-                }?;
-            }
+        for line in &self.doc_comment {
+            writeln!(f, "; {line}")?;
         }
 
         writeln!(f, "{}:", self.format_fn(self.name))?;
