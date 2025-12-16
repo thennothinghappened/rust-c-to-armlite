@@ -114,7 +114,7 @@ impl Generator {
         }
 
         let size = match ctype {
-            CType::PointerTo(_) => WORD_SIZE.into(),
+            CType::PointerTo(_) => WORD_SIZE,
 
             CType::ArrayOf(inner_id, element_count) => {
                 self.sizeof_ctype(self.program.get_ctype(inner_id)) * element_count
@@ -134,8 +134,8 @@ impl Generator {
                     })
                     .unwrap_or(0),
 
-                CConcreteType::Enum(cenum_id) => WORD_SIZE.into(),
-                CConcreteType::Func(_) => WORD_SIZE.into(),
+                CConcreteType::Enum(cenum_id) => WORD_SIZE,
+                CConcreteType::Func(_) => WORD_SIZE,
 
                 CConcreteType::Builtin(builtin) => match builtin {
                     CBuiltinType::Void => 0,
@@ -145,10 +145,10 @@ impl Generator {
                     CBuiltinType::UnsignedChar => 1,
                     CBuiltinType::Short => 2,
                     CBuiltinType::UnsignedShort => 2,
-                    CBuiltinType::Int => WORD_SIZE.into(),
-                    CBuiltinType::UnsignedInt => WORD_SIZE.into(),
-                    CBuiltinType::Long => WORD_SIZE.into(),
-                    CBuiltinType::UnsignedLong => WORD_SIZE.into(),
+                    CBuiltinType::Int => WORD_SIZE,
+                    CBuiltinType::UnsignedInt => WORD_SIZE,
+                    CBuiltinType::Long => WORD_SIZE,
+                    CBuiltinType::UnsignedLong => WORD_SIZE,
                     CBuiltinType::LongLong => 8,
                     CBuiltinType::UnsignedLongLong => 8,
                     CBuiltinType::Float => 2,
