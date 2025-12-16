@@ -275,7 +275,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             Statement::Block(block) => self.generate_block(block),
 
             _ => {
-                self.b.asm(format!("\tUnhandled statement: {stmt:?}\n"));
+                self.b.comment("=======================================");
+                self.b.asm(format!("Unhandled statement: {stmt:?}\n"));
+                self.b.comment("=======================================");
             }
         };
     }
@@ -340,7 +342,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                         CType::ArrayOf(ctype_id, _) => match ctype {
                             CType::AsIs(cconcrete_type) => {
-                                panic!("can't cast an array to a value type")
+                                panic!(
+                                    "can't cast an array of {:?} to a value type ({:?})",
+                                    self.generator.program.get_ctype(ctype_id),
+                                    cconcrete_type
+                                )
                             }
 
                             CType::PointerTo(ctype_id) => {
@@ -438,6 +444,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                             member.ctype,
                         )
                     })
+                    .rev()
                     .collect_vec();
 
                 assert_eq!(
