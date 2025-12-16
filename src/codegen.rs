@@ -101,7 +101,7 @@ impl Generator {
                     return func(b);
                 }
 
-                GenScope::new(&self, b).generate_func(cfunc);
+                FuncGenerator::new(&self, b).generate_func(cfunc);
             });
         }
 
@@ -163,7 +163,7 @@ impl Generator {
     }
 }
 
-struct GenScope<'a, 'b> {
+struct FuncGenerator<'a, 'b> {
     generator: &'b Generator,
     b: &'b mut FuncBuilder<'a>,
     stack_top_pos: i32,
@@ -171,7 +171,7 @@ struct GenScope<'a, 'b> {
     frame: Vec<(u32, bool)>,
 }
 
-impl<'a, 'b> GenScope<'a, 'b> {
+impl<'a, 'b> FuncGenerator<'a, 'b> {
     pub fn new(generator: &'b Generator, builder: &'b mut FuncBuilder<'a>) -> Self {
         Self {
             generator,
