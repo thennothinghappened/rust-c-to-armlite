@@ -42,8 +42,6 @@ impl<'a> Context<'a> {
         self.next_sourcemap_start_index
             .set(sourcemap_start_index + text.len());
 
-        println!("==== Adding source (offset = {sourcemap_start_index}) ====\n{text}");
-
         self.sources.borrow_mut().insert(
             id,
             SourceData {
