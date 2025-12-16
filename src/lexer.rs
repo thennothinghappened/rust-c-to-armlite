@@ -115,6 +115,19 @@ impl<'a> Lexer<'a> {
                 return TokenKind::DiscardMarker;
             }
 
+            if self.accept_char('*') {
+                return loop {
+                    self.take_chars_until(|char| char == '*');
+                    self.next_char();
+
+                    match self.next_char() {
+                        Some('/') => break TokenKind::DiscardMarker,
+                        None => break TokenKind::DiscardMarker,
+                        _ => continue,
+                    }
+                };
+            }
+
             return TokenKind::Divide;
         }
 
