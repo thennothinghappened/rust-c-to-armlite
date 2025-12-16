@@ -1,9 +1,9 @@
 
 #include "armlite.h"
 
-char name[128];
 
 int main() {
+	char name[128];
 	char *string = "stuff";
 
 	WriteString(string);
@@ -19,7 +19,7 @@ int main() {
 	WriteChar(name[0]);
 	WriteString("\n");
 
-	if (!(name[3] == 0)) {
+	if (!(name[2] == 0)) {
 		WriteString("Your name is at least 3 letters long.");
 	} else {
 		WriteString("Your name is less than 3 letters long.");

@@ -30,15 +30,18 @@ use crate::{
 
 mod arm;
 
+const WORD_SIZE: u32 = 4;
+
 static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
     "WriteChar" => |b| {
-        b.pop(&[Reg::R0]);
+        b.ldrb(Reg::R0, Reg::Sp+0);
         b.asm("STRB R0, .WriteChar");
+        b.add(Reg::Sp, Reg::Sp, 4);
         b.ret();
     },
     "WriteString" => |b| {
         b.pop(&[Reg::R0]);
-        b.asm("STR R0, .WriteChar");
+        b.asm("STR R0, .WriteString");
         b.ret();
     },
     "WriteSignedNum" => |b| {
@@ -98,628 +101,12 @@ impl Generator {
                     return func(b);
                 }
 
-                self.generate_func(b, cfunc)
+                GenScope::new(&self, b).generate_func(cfunc);
             });
         }
 
         self.file_builder.build()
     }
-
-    fn generate_func(&self, b: &mut FuncBuilder, cfunc: &CFunc) {
-        let mut scope = GenScope::new(self, b.sig);
-
-        let Some(Block { statements, vars }) = &cfunc.body else {
-            panic!("Function {cfunc:?} left undefined!");
-        };
-
-        b.push(&[Reg::R11, Reg::LinkReg]);
-        b.mov(Reg::R11, Reg::Sp);
-
-        self.generate_block(b, &mut scope, statements);
-
-        // b.comment("# Named Stack Variables");
-
-        // for (name, StackLocal { offset, ctype }) in scope
-        //     .named_vars
-        //     .iter()
-        //     .sorted_by(|&a, &b| a.1.offset.cmp(&b.1.offset))
-        // {
-        //     b.comment(format!("- {ctype:?} {name}: {}\n", stack_offset(*offset)));
-        // }
-
-        // b.comment("");
-        // b.comment(format!("Stack allocated size = {}", scope.stack_top_pos));
-        // b.sub(Reg::Sp, Reg::Sp, scope.stack_top_pos);
-
-        // output += &body_content;
-
-        b.label("done");
-        b.mov(Reg::Sp, Reg::R11);
-        b.pop(&[Reg::R11, Reg::LinkReg]);
-
-        if !scope.cfunc_type.args.is_empty() {
-            b.inline_comment("Eat the caller's args.");
-            b.add(
-                Reg::Sp,
-                Reg::Sp,
-                scope
-                    .cfunc_type
-                    .args
-                    .iter()
-                    .map(|arg| self.sizeof_ctype(arg.ctype))
-                    .sum::<u32>() as i32,
-            );
-        }
-
-        b.ret();
-    }
-
-    fn generate_block(
-        &self,
-        b: &mut FuncBuilder,
-        scope: &mut GenScope,
-        statements: &Vec<Statement>,
-    ) {
-        for stmt in statements {
-            self.generate_stmt(b, scope, stmt);
-        }
-    }
-
-    fn generate_stmt(&self, b: &mut FuncBuilder, scope: &mut GenScope, stmt: &Statement) {
-        match stmt {
-            Statement::Declare(variable) => {
-                let variable_offset = scope.allocate_var(variable.name.clone(), variable.ctype);
-
-                if let Some(expr) = &variable.value {
-                    // eval the initial val.
-                    self.generate_expr(b, scope, expr, Some((variable_offset, variable.ctype)));
-                }
-            }
-
-            Statement::Expr(expr) => {
-                self.generate_expr(b, scope, expr, None);
-            }
-
-            Statement::Return(expr) => {
-                let return_type_size = self.sizeof_ctype(scope.cfunc_type.returns);
-                let temp_storage = scope.allocate_anon(return_type_size);
-
-                b.comment("<return>");
-
-                self.generate_expr(
-                    b,
-                    scope,
-                    expr,
-                    Some((temp_storage, scope.cfunc_type.returns)),
-                );
-
-                if return_type_size > Self::WORD_SIZE as u32 {
-                    // the caller pushes an address where they want us to copy the returned
-                    // (presumably) struct to to return it to them, rather than splitting it
-                    // across registers or something.
-                    b.inline_comment("Grab the return storage address.");
-                    b.ldr(Reg::R0, stack_offset(4));
-                    b.ldr(Reg::R1, stack_offset(temp_storage));
-                    b.str(Reg::R1, Address::at(Reg::R0));
-                } else {
-                    // we can neatly return the value in one register. yay!
-                    b.inline_comment("Put the returned value in R0.");
-                    b.ldr(Reg::R0, stack_offset(temp_storage));
-                }
-
-                scope.forget(temp_storage);
-
-                b.inline_comment("Perform the cleanup.");
-                b.b("done");
-
-                b.comment("</return>");
-            }
-
-            Statement::If {
-                condition,
-                if_true,
-                if_false,
-            } => {
-                let if_false_label = b.anonymise("If__else");
-                let done_label = b.anonymise("If__done");
-
-                b.comment(format!("if ({condition})"));
-
-                let temp_condition_storage = scope.allocate_anon(4);
-                self.generate_expr(
-                    b,
-                    scope,
-                    condition,
-                    Some((
-                        temp_condition_storage,
-                        CType::AsIs(CConcreteType::Builtin(CBuiltinType::Bool)),
-                    )),
-                );
-
-                b.ldr(Reg::R0, stack_offset(temp_condition_storage));
-                scope.forget(temp_condition_storage);
-
-                b.cmp(Reg::R0, 0);
-
-                if if_false.is_some() {
-                    b.beq(if_false_label.clone());
-                } else {
-                    b.beq(done_label.clone());
-                }
-
-                b.comment("then");
-                self.generate_stmt(b, scope, if_true);
-
-                if let Some(if_false) = if_false {
-                    b.b(done_label.clone());
-
-                    b.comment("else");
-                    b.label(if_false_label);
-                    self.generate_stmt(b, scope, if_false);
-                }
-
-                b.comment(format!("endif ({condition})"));
-                b.label(done_label);
-            }
-
-            Statement::Block(Block { statements, vars }) => {
-                self.generate_block(b, scope, statements)
-            }
-
-            _ => {
-                b.asm(format!("\tUnhandled statement: {stmt:?}\n"));
-            }
-        };
-    }
-
-    /// Generate instructions to perform the given operation, returning the instructions required to
-    /// perform it, and place the output at `[R11-#result_offset]`.
-    fn generate_expr(
-        &self,
-        b: &mut FuncBuilder,
-        scope: &mut GenScope,
-        expr: &Expr,
-        result_info: Option<(i32, CType)>,
-    ) {
-        match expr {
-            Expr::StringLiteral(value) => {
-                let Some((result_offset, ctype)) = result_info else {
-                    // pointless no-op.
-                    return;
-                };
-
-                let string_id = self.file_builder.create_string(value);
-
-                b.mov(Reg::R0, string_id);
-                b.str(Reg::R0, stack_offset(result_offset));
-            }
-
-            Expr::IntLiteral(value) => {
-                let Some((result_offset, ctype)) = result_info else {
-                    // pointless no-op.
-                    return;
-                };
-
-                // ints are nice and relaxed :)
-                b.mov(Reg::R0, *value);
-                b.str(Reg::R0, stack_offset(result_offset));
-            }
-
-            Expr::Reference(name) => {
-                let Some((result_offset, ctype)) = result_info else {
-                    // pointless no-op.
-                    return;
-                };
-
-                if let Some(source) = scope.get_localvar(name) {
-                    b.comment(format!(
-                        "=== query localvar `{name}` ({:?}) as a {:?} ===",
-                        source.ctype, ctype
-                    ));
-
-                    match source.ctype {
-                        CType::AsIs(cconcrete_type) => {
-                            b.ldr(Reg::R0, source);
-                            b.str(Reg::R0, stack_offset(result_offset));
-                        }
-
-                        CType::PointerTo(ctype_id) => match ctype {
-                            CType::AsIs(cconcrete_type) => {
-                                panic!("can't cast a pointer to a value type")
-                            }
-
-                            CType::PointerTo(_) => {
-                                b.ldr(Reg::R0, source);
-                                b.str(Reg::R0, stack_offset(result_offset));
-                            }
-
-                            CType::ArrayOf(ctype_id, size) => todo!("load array from pointer"),
-                        },
-
-                        CType::ArrayOf(ctype_id, _) => match ctype {
-                            CType::AsIs(cconcrete_type) => {
-                                panic!("can't cast an array to a value type")
-                            }
-
-                            CType::PointerTo(ctype_id) => {
-                                b.sub(Reg::R0, Reg::R11, source.offset);
-                                b.str(Reg::R0, stack_offset(result_offset));
-                            }
-
-                            CType::ArrayOf(ctype_id, _) => {
-                                todo!("array copying!")
-                            }
-                        },
-                    }
-
-                    b.comment("=== done query `{name}` ===");
-                    return;
-                }
-
-                if let Some(symbol) = self.program.get_symbol(name) {
-                    return match symbol {
-                        Symbol::Func(cfunc) => {
-                            b.mov(Reg::R0, format!("fn_{name}"));
-                            b.str(Reg::R0, stack_offset(result_offset));
-                        }
-
-                        Symbol::Var(var_ctype, _) => {
-                            match var_ctype {
-                                // FIXME FIXME FIXME: This is a copy-pasted impl of the above with
-                                // tiny changes. Really, we need a unified `Assign` implementation
-                                // which can go between *any* storage source and destinations, with
-                                // *any* types, and use it instead rather than bespoke solutions
-                                // everywhere for every single operation.
-                                CType::AsIs(cconcrete_type) => {
-                                    b.mov(Reg::R0, format!("var_{name}"));
-                                    b.ldr(Reg::R0, Reg::R0 + 0);
-                                    b.str(Reg::R0, stack_offset(result_offset));
-                                }
-
-                                CType::PointerTo(ctype_id) => match ctype {
-                                    CType::AsIs(cconcrete_type) => {
-                                        panic!("can't cast a pointer to a value type")
-                                    }
-
-                                    CType::PointerTo(ctype_id) => {
-                                        b.mov(Reg::R0, format!("var_{name}"));
-                                        b.ldr(Reg::R0, Reg::R0 + 0);
-                                        b.str(Reg::R0, stack_offset(result_offset));
-                                    }
-
-                                    CType::ArrayOf(ctype_id, size) => {
-                                        todo!("load array from pointer")
-                                    }
-                                },
-
-                                CType::ArrayOf(ctype_id, _) => match ctype {
-                                    CType::AsIs(cconcrete_type) => {
-                                        panic!("can't cast an array to a value type")
-                                    }
-
-                                    CType::PointerTo(ctype_id) => {
-                                        b.mov(Reg::R0, format!("var_{name}"));
-                                        b.ldr(Reg::R0, Reg::R0 + 0);
-                                        b.str(Reg::R0, stack_offset(result_offset));
-                                    }
-
-                                    CType::ArrayOf(ctype_id, _) => {
-                                        todo!("array copying!")
-                                    }
-                                },
-                            }
-                        }
-                    };
-                }
-
-                panic!("Reference to undefined variable `{name}`");
-            }
-
-            Expr::Call(Call {
-                target,
-                args,
-                sig_id,
-            }) => {
-                let sig = self.program.get_func_type(*sig_id);
-
-                // push args to stack first. caller pushes args, callee expected to pop em. args
-                // pushed last first, so top of stack is the first argument.
-                let initial_frame_top = scope.stack_top_pos;
-
-                let arg_target_spots = sig
-                    .args
-                    .iter()
-                    .rev()
-                    .map(|member| {
-                        (
-                            scope.allocate_anon(self.sizeof_ctype(member.ctype)),
-                            member.ctype,
-                        )
-                    })
-                    .collect_vec();
-
-                assert_eq!(
-                    arg_target_spots.len(),
-                    args.len(),
-                    "must pass the expected arg count in calling {target:?} with signature {sig_id:?}"
-                );
-
-                let new_frame_top = scope.stack_top_pos;
-                let stack_pointer_adjustment = new_frame_top - initial_frame_top;
-
-                b.comment(format!(
-                    "=== Call {target}({}) [{stack_pointer_adjustment} arg bytes] ===",
-                    args.iter().join(", ")
-                ));
-
-                b.inline_comment("Adjust SP to point at 1st call argument!");
-                b.sub(Reg::Sp, Reg::Sp, stack_pointer_adjustment);
-
-                for (arg, out_info) in args.iter().zip(&arg_target_spots) {
-                    self.generate_expr(b, scope, arg, Some(*out_info));
-                }
-
-                match &**target {
-                    Expr::Reference(name) if scope.get_localvar(name).is_none() => {
-                        // Direct reference to a function by name. sane common case! we can just BL
-                        // there using its label name.
-                        b.call(name);
-                    }
-
-                    expr => {
-                        // FIXME: we should support type coersion rules. ugghhhhh
-                        let temp_fn_ptr_var = scope.allocate_anon(Self::WORD_SIZE.into());
-
-                        // Resolve the function pointer.
-                        self.generate_expr(
-                            b,
-                            scope,
-                            expr,
-                            Some((temp_fn_ptr_var, CType::AsIs(CConcreteType::Func(*sig_id)))),
-                        );
-
-                        b.ldr(Reg::R0, stack_offset(temp_fn_ptr_var));
-                        scope.forget(temp_fn_ptr_var);
-
-                        b.inline_comment("Manually set LR (TODO: shouldn't this be +4??)");
-                        b.mov(Reg::LinkReg, Reg::ProgCounter);
-                        b.ldr(Reg::ProgCounter, Reg::R0 + 0);
-                    }
-                };
-
-                for (spot, _) in arg_target_spots {
-                    scope.forget(spot);
-                }
-
-                let Some((out_pos, out_ctype)) = result_info else {
-                    b.comment(format!("=== END Call {target} => void ==="));
-                    return;
-                };
-
-                if self.sizeof_ctype(sig.returns) <= Self::WORD_SIZE.into() {
-                    b.str(Reg::R0, stack_offset(out_pos));
-                    b.comment(format!(
-                        "=== END Call {target} => R0 => {} ===",
-                        stack_offset(out_pos)
-                    ));
-                } else {
-                    // no-op, we should've passed this info earlier.
-                }
-            }
-
-            Expr::BinaryOp(op, left, right) => {
-                match op {
-                    BinaryOp::AndThen => {
-                        self.generate_expr(b, scope, left, None);
-                        self.generate_expr(b, scope, right, result_info);
-                    }
-
-                    BinaryOp::Assign => todo!(),
-
-                    BinaryOp::BooleanEqual => {
-                        let left_ctype = scope.type_of_expr(left);
-                        let left_temp = scope.allocate_anon(self.sizeof_ctype(left_ctype));
-
-                        let right_ctype = scope.type_of_expr(right);
-                        let right_temp = scope.allocate_anon(self.sizeof_ctype(right_ctype));
-
-                        self.generate_expr(
-                            b,
-                            scope,
-                            left,
-                            Some((left_temp, scope.type_of_expr(left))),
-                        );
-
-                        self.generate_expr(
-                            b,
-                            scope,
-                            right,
-                            Some((right_temp, scope.type_of_expr(right))),
-                        );
-
-                        let Some((result_offset, ctype)) = result_info else {
-                            // discard the result.
-                            return;
-                        };
-
-                        b.ldr(Reg::R0, stack_offset(left_temp));
-                        b.ldr(Reg::R1, stack_offset(right_temp));
-                        scope.forget(left_temp);
-                        scope.forget(right_temp);
-
-                        b.cmp(Reg::R0, Reg::R1);
-                        b.bne(3);
-                        b.mov(Reg::R0, 1);
-                        b.b(2);
-                        b.mov(Reg::R0, 0);
-                        b.str(Reg::R0, stack_offset(result_offset));
-                    }
-
-                    BinaryOp::LessThan => todo!(),
-
-                    BinaryOp::Plus => {
-                        let Some((result_offset, ctype)) = result_info else {
-                            // discard the result.
-                            return;
-                        };
-
-                        let ctype_size = self.sizeof_ctype(ctype);
-
-                        b.comment(format!("=== binop({left} + {right}) ==="));
-
-                        b.sub(Reg::Sp, Reg::Sp, ctype_size * 2);
-                        let left_temp = scope.allocate_anon(ctype_size);
-                        let right_temp = scope.allocate_anon(ctype_size);
-
-                        self.generate_expr(b, scope, left, Some((left_temp, ctype)));
-                        self.generate_expr(b, scope, right, Some((right_temp, ctype)));
-                        b.ldr(Reg::R0, stack_offset(left_temp));
-                        b.ldr(Reg::R1, stack_offset(right_temp));
-
-                        scope.forget(left_temp);
-                        scope.forget(right_temp);
-                        b.add(Reg::Sp, Reg::Sp, ctype_size * 2);
-
-                        b.add(Reg::R0, Reg::R0, Reg::R1);
-                        b.str(Reg::R0, stack_offset(result_offset));
-
-                        b.comment(format!("=== END binop({left} + {right}) ==="));
-                    }
-
-                    BinaryOp::ArrayIndex => {
-                        let Some((result_offset, ctype)) = result_info else {
-                            // pointless no-op.
-                            return;
-                        };
-
-                        let element_ctype = scope.type_of_expr(expr);
-                        let element_size = self.sizeof_ctype(element_ctype);
-
-                        let temp_index_storage = scope.allocate_anon(Self::WORD_SIZE as u32);
-                        let temp_ptr_storage = scope.allocate_anon(Self::WORD_SIZE as u32);
-
-                        self.generate_expr(
-                            b,
-                            scope,
-                            right,
-                            Some((
-                                temp_index_storage,
-                                CType::AsIs(CConcreteType::Builtin(CBuiltinType::Int)),
-                            )),
-                        );
-
-                        self.generate_expr(
-                            b,
-                            scope,
-                            left,
-                            Some((
-                                temp_ptr_storage,
-                                CType::PointerTo(
-                                    self.program
-                                        .ctype_id_of(CConcreteType::Builtin(CBuiltinType::Void)),
-                                ),
-                            )),
-                        );
-
-                        let result_size = self.sizeof_ctype(ctype);
-
-                        b.ldr(Reg::R0, stack_offset(temp_ptr_storage));
-                        b.ldr(Reg::R1, stack_offset(temp_index_storage));
-
-                        match element_size {
-                            1 => {
-                                b.ldrb(Reg::R1, Address::relative(Reg::R0, Reg::R1));
-
-                                if result_size == 1 {
-                                    b.strb(Reg::R0, stack_offset(result_offset));
-                                } else {
-                                    b.str(Reg::R0, stack_offset(result_offset));
-                                }
-                            }
-
-                            2 => {
-                                // FIXME: I'm probably doing this big-endian by accident!!
-                                b.shl(Reg::R2, Reg::R1, 1);
-                                b.add(Reg::R2, Reg::R0, Reg::R2);
-                                b.ldrb(Reg::R0, Reg::R2 + 0);
-                                b.ldrb(Reg::R1, Reg::R2 + 1);
-                                b.shl(Reg::R0, Reg::R0, 8);
-                                b.or(Reg::R0, Reg::R0, Reg::R1);
-                                b.str(Reg::R0, stack_offset(result_offset));
-                            }
-
-                            3 => {
-                                // FIXME: I'm probably doing this big-endian by accident!!
-                                b.shl(Reg::R2, Reg::R1, 1);
-                                b.add(Reg::R2, Reg::R2, Reg::R1);
-                                b.add(Reg::R2, Reg::R0, Reg::R2);
-                                b.ldrb(Reg::R0, Reg::R2 + 0);
-                                b.ldrb(Reg::R1, Reg::R2 + 1);
-                                b.shl(Reg::R0, Reg::R0, 8);
-                                b.or(Reg::R0, Reg::R0, Reg::R1);
-                                b.ldrb(Reg::R1, Reg::R2 + 2);
-                                b.shl(Reg::R0, Reg::R0, 8);
-                                b.or(Reg::R0, Reg::R0, Reg::R1);
-                                b.str(Reg::R0, stack_offset(result_offset));
-                            }
-
-                            4 => {
-                                b.shl(Reg::R1, Reg::R1, 2);
-                                b.ldr(Reg::R0, Reg::R0 + Reg::R1);
-                                b.str(Reg::R0, stack_offset(result_offset));
-                            }
-
-                            _ => todo!(
-                                "{element_ctype:?} ({element_size} bytes) can't fit in a register"
-                            ),
-                        }
-
-                        scope.forget(temp_index_storage);
-                        scope.forget(temp_ptr_storage);
-                    }
-                }
-            }
-
-            Expr::UnaryOp(op, expr) => match op {
-                UnaryOp::IncrementThenGet => todo!(),
-                UnaryOp::GetThenIncrement => todo!(),
-                UnaryOp::DecrementThenGet => todo!(),
-                UnaryOp::GetThenDecrement => todo!(),
-
-                UnaryOp::SizeOf => {
-                    let Some((result_offset, ctype)) = result_info else {
-                        // pointless no-op.
-                        return;
-                    };
-
-                    b.mov(Reg::R0, self.sizeof_ctype(scope.type_of_expr(expr)) as i32);
-                    b.str(Reg::R0, stack_offset(result_offset));
-                }
-
-                UnaryOp::BooleanNot => {
-                    self.generate_expr(b, scope, expr, result_info);
-
-                    if let Some((result_offset, ctype)) = result_info {
-                        b.ldr(Reg::R0, stack_offset(result_offset));
-                        b.cmp(Reg::R0, 0);
-                        b.bne(3);
-                        b.mov(Reg::R0, 1);
-                        b.b(2);
-                        b.mov(Reg::R0, 0);
-                        b.str(Reg::R0, stack_offset(result_offset));
-                    }
-                }
-
-                UnaryOp::Negative => todo!(),
-                UnaryOp::AddressOf => todo!(),
-                UnaryOp::Dereference => todo!(),
-            },
-
-            Expr::Cast(expr, _) => todo!(),
-        }
-    }
-
-    const WORD_SIZE: u16 = 4;
 
     fn sizeof_ctype(&self, ctype: CType) -> u32 {
         if let Some(size) = self.ctype_size_cache.borrow().get(&ctype) {
@@ -727,7 +114,7 @@ impl Generator {
         }
 
         let size = match ctype {
-            CType::PointerTo(_) => Self::WORD_SIZE.into(),
+            CType::PointerTo(_) => WORD_SIZE.into(),
 
             CType::ArrayOf(inner_id, element_count) => {
                 self.sizeof_ctype(self.program.get_ctype(inner_id)) * element_count
@@ -747,8 +134,8 @@ impl Generator {
                     })
                     .unwrap_or(0),
 
-                CConcreteType::Enum(cenum_id) => Self::WORD_SIZE.into(),
-                CConcreteType::Func(_) => Self::WORD_SIZE.into(),
+                CConcreteType::Enum(cenum_id) => WORD_SIZE.into(),
+                CConcreteType::Func(_) => WORD_SIZE.into(),
 
                 CConcreteType::Builtin(builtin) => match builtin {
                     CBuiltinType::Void => 0,
@@ -758,10 +145,10 @@ impl Generator {
                     CBuiltinType::UnsignedChar => 1,
                     CBuiltinType::Short => 2,
                     CBuiltinType::UnsignedShort => 2,
-                    CBuiltinType::Int => Self::WORD_SIZE.into(),
-                    CBuiltinType::UnsignedInt => Self::WORD_SIZE.into(),
-                    CBuiltinType::Long => Self::WORD_SIZE.into(),
-                    CBuiltinType::UnsignedLong => Self::WORD_SIZE.into(),
+                    CBuiltinType::Int => WORD_SIZE.into(),
+                    CBuiltinType::UnsignedInt => WORD_SIZE.into(),
+                    CBuiltinType::Long => WORD_SIZE.into(),
+                    CBuiltinType::UnsignedLong => WORD_SIZE.into(),
                     CBuiltinType::LongLong => 8,
                     CBuiltinType::UnsignedLongLong => 8,
                     CBuiltinType::Float => 2,
@@ -776,19 +163,19 @@ impl Generator {
     }
 }
 
-struct GenScope<'a> {
-    generator: &'a Generator,
-    cfunc_type: &'a CFuncType,
+struct GenScope<'a, 'b> {
+    generator: &'b Generator,
+    b: &'b mut FuncBuilder<'a>,
     stack_top_pos: i32,
     named_vars: HashMap<String, StackLocal>,
     frame: Vec<(u32, bool)>,
 }
 
-impl<'a> GenScope<'a> {
-    pub fn new(generator: &'a Generator, cfunc_type: &'a CFuncType) -> Self {
+impl<'a, 'b> GenScope<'a, 'b> {
+    pub fn new(generator: &'b Generator, builder: &'b mut FuncBuilder<'a>) -> Self {
         Self {
             generator,
-            cfunc_type,
+            b: builder,
             stack_top_pos: 0,
             named_vars: HashMap::default(),
             frame: Vec::default(),
@@ -796,7 +183,8 @@ impl<'a> GenScope<'a> {
     }
 
     /// Allocate space for a local variable, return its stack frame offset.
-    pub fn allocate_var(&mut self, name: String, ctype: CType) -> i32 {
+    fn allocate_var(&mut self, name: String, ctype: CType) -> i32 {
+        self.b.comment(format!("Declare `{name}` ({ctype:?})"));
         let offset = self.allocate_anon(self.generator.sizeof_ctype(ctype));
         self.named_vars.insert(name, StackLocal { offset, ctype });
 
@@ -804,7 +192,7 @@ impl<'a> GenScope<'a> {
     }
 
     /// Allocate space for an anonymous variable, return its stack frame offset.
-    pub fn allocate_anon(&mut self, size: u32) -> i32 {
+    fn allocate_anon(&mut self, size: u32) -> i32 {
         let mut actual_size = (size >> 2) << 2;
 
         if actual_size < 4 {
@@ -826,13 +214,24 @@ impl<'a> GenScope<'a> {
         self.stack_top_pos += actual_size as i32;
         self.frame.push((actual_size, true));
 
+        self.b.inline_comment(format!(
+            "Allocate {size} bytes @ [R11-{}]",
+            self.stack_top_pos
+        ));
+        self.b.sub(Reg::Sp, Reg::Sp, actual_size as i32);
+
         self.stack_top_pos
     }
 
-    /// Forget about a specific variable or anon var in the stack. its spot can now get recycled.
-    pub fn forget(&mut self, offset: i32) {
+    /// Free a local variable on the stack. Its spot can now be recycled.
+    fn free_local(&mut self, offset: i32) {
         if offset == self.stack_top_pos {
-            self.frame.last_mut().unwrap().1 = false;
+            let Some(top_slot) = self.frame.last_mut() else {
+                panic!("Can't call `forget` with an empty stack!");
+            };
+            top_slot.1 = false;
+
+            let old_stack_top_pos = self.stack_top_pos;
 
             // cascade downward and clear out all the unused vars before us.
             while let Some((size, _)) = self.frame.pop_if(|(_, in_use)| !*in_use) {
@@ -843,6 +242,9 @@ impl<'a> GenScope<'a> {
                 "frame after pop: {:?}, top = {}",
                 self.frame, self.stack_top_pos
             );
+
+            self.b
+                .add(Reg::Sp, Reg::Sp, old_stack_top_pos - self.stack_top_pos);
 
             return;
         }
@@ -861,20 +263,26 @@ impl<'a> GenScope<'a> {
         }
     }
 
+    fn forget_stack_locals(&mut self, count: usize) {
+        for _ in 0..count {
+            self.stack_top_pos -= self.frame.pop().unwrap().0 as i32;
+        }
+    }
+
     /// Get the offset of a previously defined local variable, if it exists.
-    pub fn get_localvar(&self, name: &str) -> Option<StackLocal> {
+    fn get_localvar(&self, name: &str) -> Option<StackLocal> {
         if let Some(offset) = self.named_vars.get(name) {
             return Some(*offset);
         }
 
         let mut offset: i32 = -4;
 
-        if self.generator.sizeof_ctype(self.cfunc_type.returns) > Generator::WORD_SIZE as u32 {
+        if self.generator.sizeof_ctype(self.b.sig.returns) > WORD_SIZE {
             // 0th implicit argument is the return address.
             offset -= 4;
         }
 
-        for arg in self.cfunc_type.args.iter() {
+        for arg in self.b.sig.args.iter() {
             offset -= self.generator.sizeof_ctype(arg.ctype) as i32;
 
             if arg.name.as_deref() == Some(name) {
@@ -886,6 +294,566 @@ impl<'a> GenScope<'a> {
         }
 
         None
+    }
+
+    pub(super) fn generate_func(&mut self, cfunc: &CFunc) {
+        let Some(block) = &cfunc.body else {
+            panic!("Function {cfunc:?} left undefined!");
+        };
+
+        self.b.push(&[Reg::R11, Reg::LinkReg]);
+        self.b.mov(Reg::R11, Reg::Sp);
+
+        self.generate_block(block);
+
+        self.b.label("done");
+        self.b.mov(Reg::Sp, Reg::R11);
+        self.b.pop(&[Reg::R11, Reg::LinkReg]);
+
+        if !self.b.sig.args.is_empty() {
+            self.b.inline_comment("Eat the caller's args.");
+            self.b.add(
+                Reg::Sp,
+                Reg::Sp,
+                self.b
+                    .sig
+                    .args
+                    .iter()
+                    .map(|arg| self.generator.sizeof_ctype(arg.ctype))
+                    .sum::<u32>() as i32,
+            );
+        }
+
+        self.b.ret();
+    }
+
+    fn generate_block(&mut self, block: &Block) {
+        for stmt in &block.statements {
+            self.generate_stmt(stmt);
+        }
+    }
+
+    fn generate_stmt(&mut self, stmt: &Statement) {
+        match stmt {
+            Statement::Declare(variable) => {
+                let variable_offset = self.allocate_var(variable.name.clone(), variable.ctype);
+
+                if let Some(expr) = &variable.value {
+                    // eval the initial val.
+                    self.generate_expr(expr, Some((variable_offset, variable.ctype)));
+                }
+            }
+
+            Statement::Expr(expr) => {
+                self.generate_expr(expr, None);
+            }
+
+            Statement::Return(expr) => {
+                let return_type_size = self.generator.sizeof_ctype(self.b.sig.returns);
+                let temp_storage = self.allocate_anon(return_type_size);
+
+                self.b.comment("<return>");
+
+                self.generate_expr(expr, Some((temp_storage, self.b.sig.returns)));
+
+                if return_type_size > WORD_SIZE {
+                    // the caller pushes an address where they want us to copy the returned
+                    // (presumably) struct to to return it to them, rather than splitting it
+                    // across registers or something.
+                    self.b.inline_comment("Grab the return storage address.");
+                    self.b.ldr(Reg::R0, stack_offset(4));
+                    self.b.ldr(Reg::R1, stack_offset(temp_storage));
+                    self.b.str(Reg::R1, Address::at(Reg::R0));
+                } else {
+                    // we can neatly return the value in one register. yay!
+                    self.b.inline_comment("Put the returned value in R0.");
+                    self.b.ldr(Reg::R0, stack_offset(temp_storage));
+                }
+
+                self.free_local(temp_storage);
+
+                self.b.inline_comment("Perform the cleanup.");
+                self.b.b("done");
+
+                self.b.comment("</return>");
+            }
+
+            Statement::If {
+                condition,
+                if_true,
+                if_false,
+            } => {
+                let if_false_label = self.b.anonymise("If__else");
+                let done_label = self.b.anonymise("If__done");
+
+                self.b.comment(format!("if ({condition})"));
+
+                let temp_condition_storage = self.allocate_anon(4);
+                self.generate_expr(
+                    condition,
+                    Some((
+                        temp_condition_storage,
+                        CType::AsIs(CConcreteType::Builtin(CBuiltinType::Bool)),
+                    )),
+                );
+
+                self.b.ldr(Reg::R0, stack_offset(temp_condition_storage));
+                self.free_local(temp_condition_storage);
+
+                self.b.cmp(Reg::R0, 0);
+
+                if if_false.is_some() {
+                    self.b.beq(if_false_label.clone());
+                } else {
+                    self.b.beq(done_label.clone());
+                }
+
+                self.b.comment("then");
+                self.generate_stmt(if_true);
+
+                if let Some(if_false) = if_false {
+                    self.b.b(done_label.clone());
+
+                    self.b.comment("else");
+                    self.b.label(if_false_label);
+                    self.generate_stmt(if_false);
+                }
+
+                self.b.comment(format!("endif ({condition})"));
+                self.b.label(done_label);
+            }
+
+            Statement::Block(block) => self.generate_block(block),
+
+            _ => {
+                self.b.asm(format!("\tUnhandled statement: {stmt:?}\n"));
+            }
+        };
+    }
+
+    /// Generate instructions to perform the given operation, returning the instructions required to
+    /// perform it, and place the output at `[R11-#result_offset]`.
+    fn generate_expr(&mut self, expr: &Expr, result_info: Option<(i32, CType)>) {
+        match expr {
+            Expr::StringLiteral(value) => {
+                let Some((result_offset, ctype)) = result_info else {
+                    // pointless no-op.
+                    return;
+                };
+
+                let string_id = self.generator.file_builder.create_string(value);
+
+                self.b.mov(Reg::R0, string_id);
+                self.b.str(Reg::R0, stack_offset(result_offset));
+            }
+
+            Expr::IntLiteral(value) => {
+                let Some((result_offset, ctype)) = result_info else {
+                    // pointless no-op.
+                    return;
+                };
+
+                // ints are nice and relaxed :)
+                self.b.mov(Reg::R0, *value);
+                self.b.str(Reg::R0, stack_offset(result_offset));
+            }
+
+            Expr::Reference(name) => {
+                let Some((result_offset, ctype)) = result_info else {
+                    // pointless no-op.
+                    return;
+                };
+
+                if let Some(source) = self.get_localvar(name) {
+                    self.b.comment(format!(
+                        "=== query localvar `{name}` ({:?}) as a {:?} ===",
+                        source.ctype, ctype
+                    ));
+
+                    match source.ctype {
+                        CType::AsIs(cconcrete_type) => {
+                            self.b.ldr(Reg::R0, source);
+                            self.b.str(Reg::R0, stack_offset(result_offset));
+                        }
+
+                        CType::PointerTo(ctype_id) => match ctype {
+                            CType::AsIs(cconcrete_type) => {
+                                panic!("can't cast a pointer to a value type")
+                            }
+
+                            CType::PointerTo(_) => {
+                                self.b.ldr(Reg::R0, source);
+                                self.b.str(Reg::R0, stack_offset(result_offset));
+                            }
+
+                            CType::ArrayOf(ctype_id, size) => todo!("load array from pointer"),
+                        },
+
+                        CType::ArrayOf(ctype_id, _) => match ctype {
+                            CType::AsIs(cconcrete_type) => {
+                                panic!("can't cast an array to a value type")
+                            }
+
+                            CType::PointerTo(ctype_id) => {
+                                self.b.sub(Reg::R0, Reg::R11, source.offset);
+                                self.b.str(Reg::R0, stack_offset(result_offset));
+                            }
+
+                            CType::ArrayOf(ctype_id, _) => {
+                                todo!("array copying!")
+                            }
+                        },
+                    }
+
+                    self.b.comment(format!("=== done query `{name}` ==="));
+                    return;
+                }
+
+                if let Some(symbol) = self.generator.program.get_symbol(name) {
+                    return match symbol {
+                        Symbol::Func(cfunc) => {
+                            self.b.mov(Reg::R0, format!("fn_{name}"));
+                            self.b.str(Reg::R0, stack_offset(result_offset));
+                        }
+
+                        Symbol::Var(var_ctype, _) => {
+                            match var_ctype {
+                                // FIXME FIXME FIXME: This is a copy-pasted impl of the above with
+                                // tiny changes. Really, we need a unified `Assign` implementation
+                                // which can go between *any* storage source and destinations, with
+                                // *any* types, and use it instead rather than bespoke solutions
+                                // everywhere for every single operation.
+                                CType::AsIs(cconcrete_type) => {
+                                    self.b.mov(Reg::R0, format!("var_{name}"));
+                                    self.b.ldr(Reg::R0, Reg::R0 + 0);
+                                    self.b.str(Reg::R0, stack_offset(result_offset));
+                                }
+
+                                CType::PointerTo(ctype_id) => match ctype {
+                                    CType::AsIs(cconcrete_type) => {
+                                        panic!("can't cast a pointer to a value type")
+                                    }
+
+                                    CType::PointerTo(ctype_id) => {
+                                        self.b.mov(Reg::R0, format!("var_{name}"));
+                                        self.b.ldr(Reg::R0, Reg::R0 + 0);
+                                        self.b.str(Reg::R0, stack_offset(result_offset));
+                                    }
+
+                                    CType::ArrayOf(ctype_id, size) => {
+                                        todo!("load array from pointer")
+                                    }
+                                },
+
+                                CType::ArrayOf(ctype_id, _) => match ctype {
+                                    CType::AsIs(cconcrete_type) => {
+                                        panic!("can't cast an array to a value type")
+                                    }
+
+                                    CType::PointerTo(ctype_id) => {
+                                        self.b.mov(Reg::R0, format!("var_{name}"));
+                                        self.b.ldr(Reg::R0, Reg::R0 + 0);
+                                        self.b.str(Reg::R0, stack_offset(result_offset));
+                                    }
+
+                                    CType::ArrayOf(ctype_id, _) => {
+                                        todo!("array copying!")
+                                    }
+                                },
+                            }
+                        }
+                    };
+                }
+
+                panic!("Reference to undefined variable `{name}`");
+            }
+
+            Expr::Call(Call {
+                target,
+                args,
+                sig_id,
+            }) => {
+                let sig = self.generator.program.get_func_type(*sig_id);
+
+                // push args to stack first. caller pushes args, callee expected to pop em. args
+                // pushed last first, so top of stack is the first argument.
+                let initial_frame_top = self.stack_top_pos;
+
+                let arg_target_spots = sig
+                    .args
+                    .iter()
+                    .rev()
+                    .map(|member| {
+                        (
+                            self.allocate_anon(self.generator.sizeof_ctype(member.ctype)),
+                            member.ctype,
+                        )
+                    })
+                    .collect_vec();
+
+                assert_eq!(
+                    arg_target_spots.len(),
+                    args.len(),
+                    "must pass the expected arg count in calling {target:?} with signature {sig_id:?}"
+                );
+
+                let new_frame_top = self.stack_top_pos;
+                let stack_pointer_adjustment = new_frame_top - initial_frame_top;
+
+                self.b.comment(format!(
+                    "=== Call {target}({}) [{stack_pointer_adjustment} arg bytes] ===",
+                    args.iter().join(", ")
+                ));
+
+                for (arg, out_info) in args.iter().zip(&arg_target_spots) {
+                    self.generate_expr(arg, Some(*out_info));
+                }
+
+                match &**target {
+                    Expr::Reference(name) if self.get_localvar(name).is_none() => {
+                        // Direct reference to a function by name. sane common case! we can just BL
+                        // there using its label name.
+                        self.b.call(name);
+                    }
+
+                    expr => {
+                        // FIXME: we should support type coersion rules. ugghhhhh
+                        let temp_fn_ptr_var = self.allocate_anon(WORD_SIZE);
+
+                        // Resolve the function pointer.
+                        self.generate_expr(
+                            expr,
+                            Some((temp_fn_ptr_var, CType::AsIs(CConcreteType::Func(*sig_id)))),
+                        );
+
+                        self.b.ldr(Reg::R0, stack_offset(temp_fn_ptr_var));
+                        self.free_local(temp_fn_ptr_var);
+
+                        self.b
+                            .inline_comment("Manually set LR (TODO: shouldn't this be +4??)");
+                        self.b.mov(Reg::LinkReg, Reg::ProgCounter);
+                        self.b.ldr(Reg::ProgCounter, Reg::R0 + 0);
+                    }
+                };
+
+                self.forget_stack_locals(arg_target_spots.len());
+
+                let Some((out_pos, out_ctype)) = result_info else {
+                    self.b.comment(format!("=== END Call {target} => void ==="));
+                    return;
+                };
+
+                if self.generator.sizeof_ctype(sig.returns) <= WORD_SIZE {
+                    self.b.str(Reg::R0, stack_offset(out_pos));
+                    self.b.comment(format!(
+                        "=== END Call {target} => R0 => {} ===",
+                        stack_offset(out_pos)
+                    ));
+                } else {
+                    // no-op, we should've passed this info earlier.
+                }
+            }
+
+            Expr::BinaryOp(op, left, right) => {
+                match op {
+                    BinaryOp::AndThen => {
+                        self.generate_expr(left, None);
+                        self.generate_expr(right, result_info);
+                    }
+
+                    BinaryOp::Assign => todo!(),
+
+                    BinaryOp::BooleanEqual => {
+                        let left_ctype = self.type_of_expr(left);
+                        let left_temp = self.allocate_anon(self.generator.sizeof_ctype(left_ctype));
+
+                        let right_ctype = self.type_of_expr(right);
+                        let right_temp =
+                            self.allocate_anon(self.generator.sizeof_ctype(right_ctype));
+
+                        self.generate_expr(left, Some((left_temp, self.type_of_expr(left))));
+
+                        self.generate_expr(right, Some((right_temp, self.type_of_expr(right))));
+
+                        let Some((result_offset, ctype)) = result_info else {
+                            // discard the result.
+                            return;
+                        };
+
+                        self.b.ldr(Reg::R0, stack_offset(left_temp));
+                        self.b.ldr(Reg::R1, stack_offset(right_temp));
+                        self.free_local(left_temp);
+                        self.free_local(right_temp);
+
+                        self.b.cmp(Reg::R0, Reg::R1);
+                        self.b.bne(3);
+                        self.b.mov(Reg::R0, 1);
+                        self.b.b(2);
+                        self.b.mov(Reg::R0, 0);
+                        self.b.str(Reg::R0, stack_offset(result_offset));
+                    }
+
+                    BinaryOp::LessThan => todo!(),
+
+                    BinaryOp::Plus => {
+                        let Some((result_offset, ctype)) = result_info else {
+                            // discard the result.
+                            return;
+                        };
+
+                        let ctype_size = self.generator.sizeof_ctype(ctype);
+
+                        self.b.comment(format!("=== binop({left} + {right}) ==="));
+
+                        let left_temp = self.allocate_anon(ctype_size);
+                        let right_temp = self.allocate_anon(ctype_size);
+
+                        self.generate_expr(left, Some((left_temp, ctype)));
+                        self.generate_expr(right, Some((right_temp, ctype)));
+                        self.b.ldr(Reg::R0, stack_offset(left_temp));
+                        self.b.ldr(Reg::R1, stack_offset(right_temp));
+
+                        self.free_local(left_temp);
+                        self.free_local(right_temp);
+
+                        self.b.add(Reg::R0, Reg::R0, Reg::R1);
+                        self.b.str(Reg::R0, stack_offset(result_offset));
+
+                        self.b
+                            .comment(format!("=== END binop({left} + {right}) ==="));
+                    }
+
+                    BinaryOp::ArrayIndex => {
+                        let Some((result_offset, ctype)) = result_info else {
+                            // pointless no-op.
+                            return;
+                        };
+
+                        let element_ctype = self.type_of_expr(expr);
+                        let element_size = self.generator.sizeof_ctype(element_ctype);
+
+                        let temp_index_storage = self.allocate_anon(WORD_SIZE);
+                        let temp_ptr_storage = self.allocate_anon(WORD_SIZE);
+
+                        self.generate_expr(
+                            right,
+                            Some((
+                                temp_index_storage,
+                                CType::AsIs(CConcreteType::Builtin(CBuiltinType::Int)),
+                            )),
+                        );
+
+                        self.generate_expr(
+                            left,
+                            Some((
+                                temp_ptr_storage,
+                                CType::PointerTo(
+                                    self.generator
+                                        .program
+                                        .ctype_id_of(CConcreteType::Builtin(CBuiltinType::Void)),
+                                ),
+                            )),
+                        );
+
+                        let result_size = self.generator.sizeof_ctype(ctype);
+
+                        self.b.ldr(Reg::R0, stack_offset(temp_ptr_storage));
+                        self.b.ldr(Reg::R1, stack_offset(temp_index_storage));
+
+                        match element_size {
+                            1 => {
+                                self.b.ldrb(Reg::R0, Address::relative(Reg::R0, Reg::R1));
+
+                                if result_size == 1 {
+                                    self.b.strb(Reg::R0, stack_offset(result_offset));
+                                } else {
+                                    self.b.str(Reg::R0, stack_offset(result_offset));
+                                }
+                            }
+
+                            2 => {
+                                // FIXME: I'm probably doing this big-endian by accident!!
+                                self.b.shl(Reg::R2, Reg::R1, 1);
+                                self.b.add(Reg::R2, Reg::R0, Reg::R2);
+                                self.b.ldrb(Reg::R0, Reg::R2 + 0);
+                                self.b.ldrb(Reg::R1, Reg::R2 + 1);
+                                self.b.shl(Reg::R0, Reg::R0, 8);
+                                self.b.or(Reg::R0, Reg::R0, Reg::R1);
+                                self.b.str(Reg::R0, stack_offset(result_offset));
+                            }
+
+                            3 => {
+                                // FIXME: I'm probably doing this big-endian by accident!!
+                                self.b.shl(Reg::R2, Reg::R1, 1);
+                                self.b.add(Reg::R2, Reg::R2, Reg::R1);
+                                self.b.add(Reg::R2, Reg::R0, Reg::R2);
+                                self.b.ldrb(Reg::R0, Reg::R2 + 0);
+                                self.b.ldrb(Reg::R1, Reg::R2 + 1);
+                                self.b.shl(Reg::R0, Reg::R0, 8);
+                                self.b.or(Reg::R0, Reg::R0, Reg::R1);
+                                self.b.ldrb(Reg::R1, Reg::R2 + 2);
+                                self.b.shl(Reg::R0, Reg::R0, 8);
+                                self.b.or(Reg::R0, Reg::R0, Reg::R1);
+                                self.b.str(Reg::R0, stack_offset(result_offset));
+                            }
+
+                            4 => {
+                                self.b.shl(Reg::R1, Reg::R1, 2);
+                                self.b.ldr(Reg::R0, Reg::R0 + Reg::R1);
+                                self.b.str(Reg::R0, stack_offset(result_offset));
+                            }
+
+                            _ => todo!(
+                                "{element_ctype:?} ({element_size} bytes) can't fit in a register"
+                            ),
+                        }
+
+                        self.free_local(temp_index_storage);
+                        self.free_local(temp_ptr_storage);
+                    }
+                }
+            }
+
+            Expr::UnaryOp(op, expr) => match op {
+                UnaryOp::IncrementThenGet => todo!(),
+                UnaryOp::GetThenIncrement => todo!(),
+                UnaryOp::DecrementThenGet => todo!(),
+                UnaryOp::GetThenDecrement => todo!(),
+
+                UnaryOp::SizeOf => {
+                    let Some((result_offset, ctype)) = result_info else {
+                        // pointless no-op.
+                        return;
+                    };
+
+                    self.b.mov(
+                        Reg::R0,
+                        self.generator.sizeof_ctype(self.type_of_expr(expr)) as i32,
+                    );
+                    self.b.str(Reg::R0, stack_offset(result_offset));
+                }
+
+                UnaryOp::BooleanNot => {
+                    self.generate_expr(expr, result_info);
+
+                    if let Some((result_offset, ctype)) = result_info {
+                        self.b.ldr(Reg::R0, stack_offset(result_offset));
+                        self.b.cmp(Reg::R0, 0);
+                        self.b.bne(3);
+                        self.b.mov(Reg::R0, 1);
+                        self.b.b(2);
+                        self.b.mov(Reg::R0, 0);
+                        self.b.str(Reg::R0, stack_offset(result_offset));
+                    }
+                }
+
+                UnaryOp::Negative => todo!(),
+                UnaryOp::AddressOf => todo!(),
+                UnaryOp::Dereference => todo!(),
+            },
+
+            Expr::Cast(expr, _) => todo!(),
+        }
     }
 
     fn type_of_expr(&self, expr: &Expr) -> CType {
