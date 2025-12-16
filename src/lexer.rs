@@ -9,7 +9,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    context::Context,
+    context::{Context, SourceId},
     lexer::{
         charreading::{is_newline, is_valid_identifier, is_whitespace},
         tokenkind::{IdentId, TokenKind},
@@ -37,18 +37,14 @@ pub struct Lexer<'a> {
     pub index: usize,
     chars: Chars<'a>,
     token_buffer_stream: VecDeque<Token>,
-    pub context: Rc<Context>,
+    pub context: Rc<Context<'a>>,
     if_stack_depth: usize,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(text: &'a str) -> Self {
-        Self::new_with_context(Context::default().into(), text)
-    }
-
-    fn new_with_context(context: Rc<Context>, text: &'a str) -> Self {
+    pub fn new(context: Rc<Context<'a>>, source_id: SourceId) -> Self {
         Self {
-            chars: text.chars(),
+            chars: context.get_source(source_id).chars(),
             index: 0,
             token_buffer_stream: Default::default(),
             context,
@@ -151,10 +147,16 @@ impl<'a> Lexer<'a> {
                         );
                     }
 
-                    let src = self.context.load_file(path);
+                    let source_id = match self.context.add_source_file_path(path) {
+                        Ok(id) => id,
+                        Err(_) => {
+                            return TokenKind::IncludeFileNotFound(
+                                self.context.allocate_ident(path),
+                            )
+                        }
+                    };
 
-                    let mut temp_lexer =
-                        Lexer::new_with_context(self.context.clone(), src.as_str());
+                    let mut temp_lexer = Lexer::new(self.context.clone(), source_id);
 
                     loop {
                         let token = temp_lexer.next();

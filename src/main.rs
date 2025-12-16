@@ -2,6 +2,7 @@ use std::{
     env::args,
     fs::{self, read, read_to_string},
     io::stdin,
+    rc::Rc,
 };
 
 use codespan_reporting::{
@@ -10,7 +11,7 @@ use codespan_reporting::{
     term,
 };
 
-use crate::{lexer::Lexer, parser::Parser};
+use crate::{context::Context, lexer::Lexer, parser::Parser};
 
 #[macro_use]
 mod id_type;
@@ -30,7 +31,7 @@ fn main() {
     if let Some(path) = args().nth(1) {
         let buf = read_to_string(&path).expect("Must pass a valid path to read from");
 
-        let Some(output) = parse_program(&buf, &path, &codespan_writer, &codespan_config) else {
+        let Some(output) = parse_program(buf, &path, &codespan_writer, &codespan_config) else {
             return;
         };
 
@@ -44,34 +45,36 @@ fn main() {
     let stdin = stdin();
 
     loop {
-        let mut buf = String::new();
-
         loop {
+            let mut buf = String::new();
             stdin.read_line(&mut buf).unwrap();
 
             if buf.trim_end().ends_with(";;") {
                 break;
             }
 
-            parse_program(&buf, "stdin", &codespan_writer, &codespan_config);
+            parse_program(buf, "stdin", &codespan_writer, &codespan_config);
         }
     }
 }
 
 fn parse_program(
-    buf: &str,
+    text: String,
     file_name: &str,
     codespan_writer: &term::termcolor::StandardStream,
     codespan_config: &term::Config,
 ) -> Option<String> {
-    let lexer = Lexer::new(buf);
+    let context = Rc::new(Context::default());
+    let source_id = context.add_source_text(text);
+
+    let lexer = Lexer::new(context.clone(), source_id);
     let parser = Parser::new(lexer);
 
     let program = match parser.parse() {
         Ok(program) => program,
         Err(err) => {
             let mut files = SimpleFiles::new();
-            let file = files.add(file_name, &buf);
+            let file = files.add(file_name, context.get_source(source_id));
 
             let diagnostic = Diagnostic::error()
                 .with_label(Label::primary(file, err.span).with_message(err.kind));

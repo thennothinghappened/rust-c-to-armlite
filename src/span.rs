@@ -4,6 +4,8 @@ use std::{
     ops::Range,
 };
 
+use crate::context::SourceId;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Span {
     pub start: usize,

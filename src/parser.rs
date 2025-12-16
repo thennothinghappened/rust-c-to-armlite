@@ -784,7 +784,7 @@ pub enum ParseErrorKind {
     Lazy(String),
 }
 
-impl<'a> From<anyhow::Error> for ParseErrorKind {
+impl From<anyhow::Error> for ParseErrorKind {
     fn from(value: anyhow::Error) -> Self {
         Self::Lazy(value.to_string())
     }
