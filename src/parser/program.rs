@@ -11,16 +11,13 @@ use thiserror::Error;
 
 use crate::{
     id_type::GetAndIncrement,
-    parser::{
-        program::{
-            expr::Expr,
-            statement::{Block, Variable},
-            types::{
-                CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CStruct, CStructId,
-                CType, CTypeId, Member, TypeDef,
-            },
+    parser::program::{
+        expr::Expr,
+        statement::{Block, Variable},
+        types::{
+            CBuiltinType, CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CStruct,
+            CStructId, CType, CTypeId, Member, TypeDef,
         },
-        TodoType,
     },
 };
 
@@ -152,7 +149,7 @@ impl Program {
             .expect("Getting a CStruct by its ID should NEVER fail or we're out of sync")
     }
 
-    pub fn get_func_type(&self, id: CFuncTypeId) -> &CFuncType {
+    pub fn get_cfunc_sig(&self, id: CFuncTypeId) -> &CFuncType {
         self.func_types
             .get(&id)
             .expect("Getting a CFuncSig by its ID should NEVER fail or we're out of sync")
@@ -214,6 +211,52 @@ impl Program {
 
     pub fn get_symbol(&self, name: &str) -> Option<&Symbol> {
         self.global_symbols.get(name)
+    }
+
+    pub fn format_ctype(&self, ctype: impl Into<CType>) -> String {
+        let ctype: CType = ctype.into();
+
+        match ctype {
+            CType::AsIs(cconcrete_type) => match cconcrete_type {
+                CConcreteType::Struct(cstruct_id) => {
+                    match self.structs_by_name.iter().find_map(|(name, id)| {
+                        if *id == cstruct_id {
+                            Some(name)
+                        } else {
+                            None
+                        }
+                    }) {
+                        Some(name) => format!("struct {name}"),
+                        None => "struct".to_string(),
+                    }
+                }
+
+                CConcreteType::Enum(cenum_id) => todo!("Enum ctypes"),
+
+                CConcreteType::Func(cfunc_type_id) => {
+                    let sig = self.get_cfunc_sig(cfunc_type_id);
+
+                    format!(
+                        "{}(*)({})",
+                        self.format_ctype(sig.returns),
+                        sig.args
+                            .iter()
+                            .map(|arg| self.format_ctype(arg.ctype))
+                            .join(", ")
+                    )
+                }
+
+                CConcreteType::Builtin(cbuiltin_type) => format!("{cbuiltin_type}"),
+            },
+
+            CType::PointerTo(ctype_id) => {
+                format!("{}*", self.format_ctype(self.get_ctype(ctype_id)))
+            }
+
+            CType::ArrayOf(ctype_id, length) => {
+                format!("{}[{length}]", self.format_ctype(self.get_ctype(ctype_id)))
+            }
+        }
     }
 }
 

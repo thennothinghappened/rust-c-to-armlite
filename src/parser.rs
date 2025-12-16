@@ -20,8 +20,6 @@ pub mod program;
 mod block_builder;
 mod parser_advancing;
 
-pub enum TodoType {}
-
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     program: program::Program,
@@ -445,8 +443,6 @@ impl<'a> Parser<'a> {
                     args,
                 });
 
-                println!("{operand}");
-
                 continue;
             }
 
@@ -738,7 +734,7 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            Expr::Call(call) => Ok(self.program.get_func_type(call.sig_id).returns),
+            Expr::Call(call) => Ok(self.program.get_cfunc_sig(call.sig_id).returns),
 
             Expr::BinaryOp(op, left, right) => match op {
                 BinaryOp::AndThen | BinaryOp::Assign => self.resolve_ctype(right),

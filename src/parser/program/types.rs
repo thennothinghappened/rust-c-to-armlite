@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{
     id_type,
     parser::program::statement::{Block, Statement},
@@ -68,6 +70,33 @@ impl CBuiltinType {
             Self::UnsignedLongLong => Some(Self::LongLong),
             _ => None,
         }
+    }
+}
+
+impl Display for CBuiltinType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                CBuiltinType::Void => "void",
+                CBuiltinType::Bool => "bool",
+                CBuiltinType::Char => "char",
+                CBuiltinType::SignedChar => "signed char",
+                CBuiltinType::UnsignedChar => "unsigned char",
+                CBuiltinType::Short => "short",
+                CBuiltinType::UnsignedShort => "unsigned short",
+                CBuiltinType::Int => "int",
+                CBuiltinType::UnsignedInt => "unsigned int",
+                CBuiltinType::Long => "long",
+                CBuiltinType::UnsignedLong => "unsigned long",
+                CBuiltinType::LongLong => "long long",
+                CBuiltinType::UnsignedLongLong => "unsigned long long",
+                CBuiltinType::Float => "float",
+                CBuiltinType::Double => "double",
+                CBuiltinType::LongDouble => "long double",
+            }
+        )
     }
 }
 

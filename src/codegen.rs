@@ -18,14 +18,11 @@ use crate::{
         func_generator::FuncGenerator,
     },
     context::Context,
-    parser::{
-        program::{
-            expr::{call::Call, BinaryOp, Expr, UnaryOp},
-            statement::{Block, Statement, Variable},
-            types::{CBuiltinType, CConcreteType, CFunc, CFuncType, CType},
-            Program, Symbol,
-        },
-        TodoType,
+    parser::program::{
+        expr::{call::Call, BinaryOp, Expr, UnaryOp},
+        statement::{Block, Statement, Variable},
+        types::{CBuiltinType, CConcreteType, CFunc, CFuncType, CType},
+        Program, Symbol,
     },
 };
 
@@ -95,7 +92,7 @@ impl Generator {
 
     pub fn generate(self) -> String {
         for (name, cfunc) in self.program.get_defined_functions() {
-            let sig = self.program.get_func_type(cfunc.sig_id);
+            let sig = self.program.get_cfunc_sig(cfunc.sig_id);
 
             self.file_builder.create_function(name, sig, |b| {
                 if !b.sig.args.is_empty() {
@@ -103,10 +100,14 @@ impl Generator {
 
                     for arg in &b.sig.args {
                         match &arg.name {
-                            Some(name) => b.append_doc_line(format!("- {name} ({:?})", arg.ctype)),
-                            None => {
-                                b.append_doc_line(format!("- Unnamed argument ({:?})", arg.ctype))
-                            }
+                            Some(name) => b.append_doc_line(format!(
+                                "- {name} ({})",
+                                self.program.format_ctype(arg.ctype)
+                            )),
+                            None => b.append_doc_line(format!(
+                                "- Unnamed argument ({})",
+                                self.program.format_ctype(arg.ctype)
+                            )),
                         };
                     }
                 }

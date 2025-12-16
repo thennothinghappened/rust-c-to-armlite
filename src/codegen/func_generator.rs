@@ -40,7 +40,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
     /// Allocate space for a local variable, return its stack frame offset.
     fn allocate_var(&mut self, name: String, ctype: CType) -> i32 {
-        self.b.comment(format!("Declare `{name}` ({ctype:?})"));
+        self.b.comment(format!(
+            "{} {name};",
+            self.generator.program.format_ctype(ctype)
+        ));
+
         let offset = self.allocate_anon(self.generator.sizeof_ctype(ctype));
         self.named_vars.insert(name, StackLocal { offset, ctype });
 
@@ -374,8 +378,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 if let Some(source) = self.get_localvar(name) {
                     self.b.comment(format!(
-                        "=== query localvar `{name}` ({:?}) as a {:?} ===",
-                        source.ctype, ctype
+                        "=== query localvar `{name}` ({}) as a {} ===",
+                        self.generator.program.format_ctype(source.ctype),
+                        self.generator.program.format_ctype(ctype)
                     ));
 
                     match source.ctype {
@@ -485,7 +490,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 args,
                 sig_id,
             }) => {
-                let sig = self.generator.program.get_func_type(*sig_id);
+                let sig = self.generator.program.get_cfunc_sig(*sig_id);
 
                 // push args to stack first. caller pushes args, callee expected to pop em. args
                 // pushed last first, so top of stack is the first argument.

@@ -1,6 +1,6 @@
 
 #include "armlite.h"
-
+#include "StringLength.c"
 
 int main() {
 	char name[128];
@@ -19,10 +19,16 @@ int main() {
 	WriteChar(name[0]);
 	WriteString("\n");
 
-	if (!(name[2] == 0)) {
-		WriteString("Your name is at least 3 letters long.");
-	} else {
+	size_t nameLength = StringLength(name, sizeof(name));
+	
+	
+	if (nameLength == 0 /*|| nameLength == 1 || nameLength == 2*/)
+	{
 		WriteString("Your name is less than 3 letters long.");
+	}
+	else
+	{
+		WriteString("Your name is at least 3 letters long.");
 	}
 
 	return 1;

@@ -1,9 +1,7 @@
 
+#include "stdint.h"
 #include "armlite.h"
-
-typedef unsigned int size_t;
-
-size_t StringLength(char* buffer, size_t bufferLength);
+#include "StringLength.c"
 
 int main()
 {
@@ -19,21 +17,4 @@ int main()
 	WriteString("letters long.\n");
 
 	return nameLength;
-}
-
-size_t StringLength(char* buffer, size_t bufferLength)
-{
-	size_t index = 0;
-
-	while (!(index == bufferLength))
-	{
-		if (buffer[index] == 0)
-		{
-			break;
-		}
-
-		index = index + 1;
-	}
-
-	return index;
 }
