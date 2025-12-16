@@ -45,7 +45,7 @@ impl<'a> Lexer<'a> {
     pub fn new(context: Rc<Context<'a>>, source_id: SourceId) -> Self {
         Self {
             chars: context.get_source(source_id).chars(),
-            index: 0,
+            index: context.get_source_start_index(source_id),
             token_buffer_stream: Default::default(),
             context,
             if_stack_depth: 0,
@@ -147,7 +147,7 @@ impl<'a> Lexer<'a> {
                         );
                     }
 
-                    let source_id = match self.context.add_source_file_path(path) {
+                    let source_id = match self.context.add_source_file_path(path.to_owned()) {
                         Ok(id) => id,
                         Err(_) => {
                             return TokenKind::IncludeFileNotFound(

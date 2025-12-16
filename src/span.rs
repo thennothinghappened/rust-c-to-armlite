@@ -1,7 +1,7 @@
 use std::{
     cmp::{max, min},
     fmt::Display,
-    ops::Range,
+    ops::{Range, Sub},
 };
 
 use crate::context::SourceId;
@@ -68,5 +68,13 @@ impl From<Range<usize>> for Span {
 impl From<usize> for Span {
     fn from(value: usize) -> Self {
         Self::at(value)
+    }
+}
+
+impl Sub<usize> for Span {
+    type Output = Self;
+
+    fn sub(self, rhs: usize) -> Self::Output {
+        Self::new(self.start - rhs, self.end - rhs)
     }
 }

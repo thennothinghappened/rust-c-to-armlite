@@ -31,7 +31,8 @@ fn main() {
     if let Some(path) = args().nth(1) {
         let buf = read_to_string(&path).expect("Must pass a valid path to read from");
 
-        let Some(output) = parse_program(buf, &path, &codespan_writer, &codespan_config) else {
+        let Some(output) = parse_program(buf, Some(path), &codespan_writer, &codespan_config)
+        else {
             return;
         };
 
@@ -53,19 +54,23 @@ fn main() {
                 break;
             }
 
-            parse_program(buf, "stdin", &codespan_writer, &codespan_config);
+            parse_program(buf, None, &codespan_writer, &codespan_config);
         }
     }
 }
 
 fn parse_program(
     text: String,
-    file_name: &str,
+    file_name: Option<String>,
     codespan_writer: &term::termcolor::StandardStream,
     codespan_config: &term::Config,
 ) -> Option<String> {
     let context = Rc::new(Context::default());
-    let source_id = context.add_source_text(text);
+
+    let source_id = match file_name {
+        Some(path) => context.add_source_file_path(path).ok()?,
+        None => context.add_source_text(text),
+    };
 
     let lexer = Lexer::new(context.clone(), source_id);
     let parser = Parser::new(lexer);
@@ -74,10 +79,18 @@ fn parse_program(
         Ok(program) => program,
         Err(err) => {
             let mut files = SimpleFiles::new();
-            let file = files.add(file_name, context.get_source(source_id));
 
-            let diagnostic = Diagnostic::error()
-                .with_label(Label::primary(file, err.span).with_message(err.kind));
+            let offending_source_id = context.get_source_id_from_index(err.span.start);
+            let sourcemap_offset = context.get_source_start_index(offending_source_id);
+
+            let file = files.add(
+                context.get_source_name(offending_source_id),
+                context.get_source(offending_source_id),
+            );
+
+            let diagnostic = Diagnostic::error().with_label(
+                Label::primary(file, err.span - sourcemap_offset).with_message(err.kind),
+            );
 
             term::emit(
                 &mut codespan_writer.lock(),

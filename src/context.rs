@@ -20,40 +20,57 @@ id_type!(
 #[derive(Default)]
 pub(crate) struct Context<'a> {
     sources_by_path: RefCell<HashMap<String, SourceId>>,
-    sources: RefCell<HashMap<SourceId, Box<str>>>,
+    sources: RefCell<HashMap<SourceId, SourceData>>,
+    sources_ref_phantom: PhantomData<&'a str>,
     next_source_id: Cell<SourceId>,
+    next_sourcemap_start_index: Cell<usize>,
 
     idents: RefCell<Vec<Rc<String>>>,
     macros: RefCell<HashMap<String, Rc<String>>>,
-    phantom_data: PhantomData<Chars<'a>>,
+}
+
+struct SourceData {
+    text: Box<str>,
+    sourcemap_start_index: usize,
 }
 
 impl<'a> Context<'a> {
     pub(crate) fn add_source_text(&self, text: String) -> SourceId {
         let id = self.next_source_id.get_and_increment();
-        self.sources.borrow_mut().insert(id, text.into_boxed_str());
+
+        let sourcemap_start_index = self.next_sourcemap_start_index.get();
+        self.next_sourcemap_start_index
+            .set(sourcemap_start_index + text.len());
+
+        println!("==== Adding source (offset = {sourcemap_start_index}) ====\n{text}");
+
+        self.sources.borrow_mut().insert(
+            id,
+            SourceData {
+                text: text.into_boxed_str(),
+                sourcemap_start_index,
+            },
+        );
 
         id
     }
 
-    pub(crate) fn add_source_file_path(&self, path: &str) -> Result<SourceId, io::Error> {
-        if let Some(&existing_id) = self.sources_by_path.borrow().get(path) {
+    pub(crate) fn add_source_file_path(&self, path: String) -> Result<SourceId, io::Error> {
+        if let Some(&existing_id) = self.sources_by_path.borrow().get(&path) {
             return Ok(existing_id);
         }
 
-        let text = fs::read_to_string(path)?;
+        let text = fs::read_to_string(&path)?;
         let id = self.add_source_text(text);
 
-        self.sources_by_path
-            .borrow_mut()
-            .insert(path.to_owned(), id);
+        self.sources_by_path.borrow_mut().insert(path, id);
 
         Ok(id)
     }
 
     pub(crate) fn get_source(&self, id: SourceId) -> &'a str {
         let sources = self.sources.borrow();
-        let string_ptr = sources[&id].as_ref();
+        let string_ptr = sources[&id].text.as_ref();
 
         // Safety: We NEVER EVER remove sources from the list, thus we guarantee that the buffer for
         // a given SourceId will have a lifetime from the insertion of that source, until the lexer
@@ -63,6 +80,36 @@ impl<'a> Context<'a> {
         // a reference to the underlying source string for this ID, rather than a reference to its
         // address in the HashMap, so the reference remains valid.
         unsafe { std::mem::transmute::<&str, &'a str>(string_ptr) }
+    }
+
+    pub(crate) fn get_source_name(&self, id: SourceId) -> String {
+        self.sources_by_path
+            .borrow()
+            .iter()
+            .find_map(|entry| {
+                if *entry.1 == id {
+                    Some(entry.0.to_owned())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| format!("anon {}", id.0))
+    }
+
+    pub(crate) fn get_source_start_index(&self, id: SourceId) -> usize {
+        self.sources.borrow()[&id].sourcemap_start_index
+    }
+
+    pub(crate) fn get_source_id_from_index(&self, index: usize) -> SourceId {
+        for id in (0..self.next_source_id.get().0).map(SourceId) {
+            let start_index = self.get_source_start_index(id);
+
+            if start_index > index {
+                return SourceId(id.0 - 1);
+            }
+        }
+
+        SourceId(self.next_source_id.get().0 - 1)
     }
 
     pub(crate) fn allocate_ident(&self, data: impl Into<String>) -> IdentId {
