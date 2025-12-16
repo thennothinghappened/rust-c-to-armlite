@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use itertools::Itertools;
 
@@ -12,12 +12,18 @@ use crate::{
     },
 };
 
+struct Breakable {
+    loop_label: String,
+    done_label: String,
+}
+
 pub(super) struct FuncGenerator<'a, 'b> {
     generator: &'b Generator,
     b: &'b mut FuncBuilder<'a>,
     stack_top_pos: i32,
     named_vars: HashMap<String, StackLocal>,
     frame: Vec<(u32, bool)>,
+    breakable_stack: VecDeque<Breakable>,
 }
 
 impl<'a, 'b> FuncGenerator<'a, 'b> {
@@ -28,6 +34,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             stack_top_pos: 0,
             named_vars: HashMap::default(),
             frame: Vec::default(),
+            breakable_stack: VecDeque::default(),
         }
     }
 
@@ -227,6 +234,26 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.comment("</return>");
             }
 
+            Statement::Break => {
+                self.b.comment("break");
+                self.b.b(self
+                    .breakable_stack
+                    .back()
+                    .expect("break can't be used outside a breakable")
+                    .done_label
+                    .clone());
+            }
+
+            Statement::Continue => {
+                self.b.comment("continue");
+                self.b.b(self
+                    .breakable_stack
+                    .back()
+                    .expect("continue can't be used outside a breakable")
+                    .loop_label
+                    .clone());
+            }
+
             Statement::If {
                 condition,
                 if_true,
@@ -272,13 +299,43 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.label(done_label);
             }
 
-            Statement::Block(block) => self.generate_block(block),
+            Statement::While { condition, block } => {
+                let loop_label = self.b.anonymise("While__loop");
+                let done_label = self.b.anonymise("While__done");
 
-            _ => {
-                self.b.comment("=======================================");
-                self.b.asm(format!("Unhandled statement: {stmt:?}\n"));
-                self.b.comment("=======================================");
+                self.breakable_stack.push_back(Breakable {
+                    loop_label: loop_label.clone(),
+                    done_label: done_label.clone(),
+                });
+
+                self.b.comment(format!("while ({condition})"));
+                let temp_condition_storage = self.allocate_anon(4);
+
+                self.b.label(loop_label.clone());
+                self.generate_expr(
+                    condition,
+                    Some((
+                        temp_condition_storage,
+                        CType::AsIs(CConcreteType::Builtin(CBuiltinType::Bool)),
+                    )),
+                );
+
+                self.b.ldr(Reg::R0, stack_offset(temp_condition_storage));
+                self.b.cmp(Reg::R0, 0);
+                self.b.beq(done_label.clone());
+
+                self.b.comment("do");
+                self.generate_stmt(block);
+                self.b.b(loop_label);
+
+                self.b.comment(format!("endwhile ({condition})"));
+                self.b.label(done_label);
+                self.free_local(temp_condition_storage);
+
+                self.breakable_stack.pop_back();
             }
+
+            Statement::Block(block) => self.generate_block(block),
         };
     }
 
@@ -434,7 +491,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 // pushed last first, so top of stack is the first argument.
                 let initial_frame_top = self.stack_top_pos;
 
-                let arg_target_spots = sig
+                let mut arg_target_spots = sig
                     .args
                     .iter()
                     .rev()
@@ -444,8 +501,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                             member.ctype,
                         )
                     })
-                    .rev()
                     .collect_vec();
+
+                arg_target_spots.reverse();
 
                 assert_eq!(
                     arg_target_spots.len(),
@@ -517,7 +575,33 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         self.generate_expr(right, result_info);
                     }
 
-                    BinaryOp::Assign => todo!(),
+                    BinaryOp::Assign => match &**left {
+                        Expr::StringLiteral(_) => panic!("A string is not an assignment target"),
+                        Expr::IntLiteral(_) => panic!("A number is not an assignment target"),
+                        Expr::Call(_) => panic!("A function call is not an assignment target"),
+
+                        Expr::Reference(name) => {
+                            if let Some(local) = self.get_localvar(name) {
+                                self.generate_expr(right, Some((local.offset, local.ctype)));
+
+                                if let Some(result_info) = result_info {
+                                    todo!("assign-and-return")
+                                }
+
+                                return;
+                            }
+
+                            panic!("Bad assignment target: undeclared variable `{name}`")
+                        }
+
+                        Expr::BinaryOp(binary_op, expr, expr1) => {
+                            todo!("Assignment target result of BinaryOp")
+                        }
+                        Expr::UnaryOp(unary_op, expr) => {
+                            todo!("Assignment target result of UnaryOp")
+                        }
+                        Expr::Cast(expr, ctype) => todo!("Cast assignment target >:("),
+                    },
 
                     BinaryOp::BooleanEqual => {
                         let left_ctype = self.type_of_expr(left);

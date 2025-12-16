@@ -288,6 +288,20 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Return(Box::new(value)))
             }
 
+            TokenKind::Break => {
+                self.next();
+                self.expect(TokenKind::Semicolon)?;
+
+                Ok(Statement::Break)
+            }
+
+            TokenKind::Continue => {
+                self.next();
+                self.expect(TokenKind::Semicolon)?;
+
+                Ok(Statement::Continue)
+            }
+
             _ => {
                 // Whatever is left could either be a variable declaration, or could be a lone
                 // expression. We'll cheat by spawning two clones of this parser and parsing both

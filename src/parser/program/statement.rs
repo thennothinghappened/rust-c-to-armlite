@@ -20,6 +20,8 @@ pub enum Statement {
     },
 
     Return(Box<Expr>),
+    Break,
+    Continue,
 }
 
 #[derive(Debug, Clone, PartialEq)]

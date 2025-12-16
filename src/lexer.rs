@@ -265,6 +265,8 @@ impl<'a> Lexer<'a> {
                 "else" => Some(TokenKind::Else),
                 "while" => Some(TokenKind::While),
                 "return" => Some(TokenKind::Return),
+                "break" => Some(TokenKind::Break),
+                "continue" => Some(TokenKind::Continue),
                 "struct" => Some(TokenKind::Struct),
                 "typedef" => Some(TokenKind::TypeDef),
                 "union" => Some(TokenKind::Union),
