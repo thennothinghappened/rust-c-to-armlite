@@ -369,17 +369,21 @@ impl<'a> Parser<'a> {
             match token {
                 TokenKind::Comma => Some(BinaryOp::AndThen),
                 TokenKind::Assign => Some(BinaryOp::Assign),
-                TokenKind::BooleanEqual => Some(BinaryOp::BooleanEqual),
+                TokenKind::BooleanEqual => Some(BinaryOp::LogicEqual),
+                TokenKind::BooleanAnd => Some(BinaryOp::LogicAnd),
+                TokenKind::BooleanOr => Some(BinaryOp::LogicOr),
                 TokenKind::LessThan => Some(BinaryOp::LessThan),
+                TokenKind::GreaterThan => Some(BinaryOp::GreaterThan),
                 TokenKind::Plus => Some(BinaryOp::Plus),
+                TokenKind::Minus => Some(BinaryOp::Minus),
                 _ => None,
             }
-            .filter(|op| op.binding_power() >= min_power)
+            .filter(|op| op.binding_strength() >= min_power)
         }) {
             lhs = Expr::BinaryOp(
                 op,
                 Box::new(lhs),
-                Box::new(self.parse_expr(op.binding_power())?),
+                Box::new(self.parse_expr(op.binding_strength())?),
             );
         }
 
@@ -424,7 +428,7 @@ impl<'a> Parser<'a> {
                 while !self.accept(TokenKind::CloseParen) {
                     // Args are not allowed to use the comma operator, since that'd conflict with
                     // comma being the function arg separator.
-                    args.push(self.parse_expr(BinaryOp::AndThen.binding_power() + 1)?);
+                    args.push(self.parse_expr(BinaryOp::AndThen.binding_strength() + 1)?);
 
                     if !self.accept(TokenKind::Comma) {
                         self.expect(TokenKind::CloseParen)?;
@@ -738,13 +742,10 @@ impl<'a> Parser<'a> {
 
             Expr::BinaryOp(op, left, right) => match op {
                 BinaryOp::AndThen | BinaryOp::Assign => self.resolve_ctype(right),
-
-                BinaryOp::BooleanEqual | BinaryOp::LessThan => {
+                BinaryOp::LogicEqual | BinaryOp::LessThan => {
                     Ok(CType::AsIs(CBuiltinType::Bool.into()))
                 }
-
                 BinaryOp::Plus => self.resolve_ctype(left),
-
                 BinaryOp::ArrayIndex => match self.resolve_ctype(left)? {
                     CType::PointerTo(element_ctype) => Ok(self.program.get_ctype(element_ctype)),
 
@@ -752,6 +753,17 @@ impl<'a> Parser<'a> {
 
                     ctype => self.error(format!("cant index non-array/ptr type {ctype:#?}")),
                 },
+                BinaryOp::Minus => todo!(),
+                BinaryOp::BitwiseLeftShift => todo!(),
+                BinaryOp::BitwiseRightShift => todo!(),
+                BinaryOp::LessOrEqual => todo!(),
+                BinaryOp::GreaterThan => todo!(),
+                BinaryOp::GreaterOrEqual => todo!(),
+                BinaryOp::BitwiseXor => todo!(),
+                BinaryOp::BitwiseAnd => todo!(),
+                BinaryOp::BitwiseOr => todo!(),
+                BinaryOp::LogicAnd => todo!(),
+                BinaryOp::LogicOr => todo!(),
             },
 
             Expr::UnaryOp(op, expr) => todo!(),

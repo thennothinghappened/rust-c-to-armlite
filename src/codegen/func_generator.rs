@@ -346,6 +346,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     /// Generate instructions to perform the given operation, returning the instructions required to
     /// perform it, and place the output at `[R11-#result_offset]`.
     fn generate_expr(&mut self, expr: &Expr, result_info: Option<(i32, CType)>) {
+        self.b.comment(format!("Perform expression `{expr}`"));
+
         match expr {
             Expr::StringLiteral(value) => {
                 let Some((result_offset, ctype)) = result_info else {
@@ -579,7 +581,6 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         self.generate_expr(left, None);
                         self.generate_expr(right, result_info);
                     }
-
                     BinaryOp::Assign => match &**left {
                         Expr::StringLiteral(_) => panic!("A string is not an assignment target"),
                         Expr::IntLiteral(_) => panic!("A number is not an assignment target"),
@@ -607,8 +608,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         }
                         Expr::Cast(expr, ctype) => todo!("Cast assignment target >:("),
                     },
-
-                    BinaryOp::BooleanEqual => {
+                    BinaryOp::LogicEqual => {
                         let left_ctype = self.type_of_expr(left);
                         let left_temp = self.allocate_anon(self.generator.sizeof_ctype(left_ctype));
 
@@ -637,9 +637,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         self.b.mov(Reg::R0, 0);
                         self.b.str(Reg::R0, stack_offset(result_offset));
                     }
-
                     BinaryOp::LessThan => todo!(),
-
                     BinaryOp::Plus => {
                         let Some((result_offset, ctype)) = result_info else {
                             // discard the result.
@@ -667,7 +665,6 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         self.b
                             .comment(format!("=== END binop({left} + {right}) ==="));
                     }
-
                     BinaryOp::ArrayIndex => {
                         let Some((result_offset, ctype)) = result_info else {
                             // pointless no-op.
@@ -756,6 +753,67 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         self.free_local(temp_index_storage);
                         self.free_local(temp_ptr_storage);
                     }
+
+                    BinaryOp::Minus => todo!(),
+                    BinaryOp::BitwiseLeftShift => todo!(),
+                    BinaryOp::BitwiseRightShift => todo!(),
+                    BinaryOp::LessOrEqual => todo!(),
+                    BinaryOp::GreaterThan => todo!(),
+                    BinaryOp::GreaterOrEqual => todo!(),
+                    BinaryOp::BitwiseXor => todo!(),
+                    BinaryOp::BitwiseAnd => todo!(),
+                    BinaryOp::BitwiseOr => todo!(),
+
+                    BinaryOp::LogicAnd | BinaryOp::LogicOr => {
+                        let is_and = matches!(op, BinaryOp::LogicAnd);
+
+                        let condition_storage = self.allocate_anon(WORD_SIZE);
+
+                        let done_label = self.b.anonymise(if is_and {
+                            "LogicAnd__done"
+                        } else {
+                            "LogicOr__done"
+                        });
+
+                        self.b.comment("Evaluate LHS");
+                        self.generate_expr(
+                            left,
+                            Some((condition_storage, CBuiltinType::Bool.into())),
+                        );
+
+                        self.b.comment("Test if LHS is truthy");
+                        self.b.ldr(Reg::R0, stack_offset(condition_storage));
+                        self.b.cmp(Reg::R0, 0);
+
+                        if is_and {
+                            self.b.beq(done_label.clone());
+                            self.b.comment("LHS is truthy, evaluate RHS");
+                        } else {
+                            self.b.bne(done_label.clone());
+                            self.b.comment("LHS is falsey, evaluate RHS");
+                        }
+
+                        self.generate_expr(
+                            right,
+                            Some((condition_storage, CBuiltinType::Bool.into())),
+                        );
+
+                        self.b.label(done_label);
+
+                        if let Some((offset, ctype)) = result_info {
+                            if ctype != CBuiltinType::Bool.into() {
+                                todo!(
+                                    "Cast bool result to {}",
+                                    self.generator.program.format_ctype(ctype)
+                                )
+                            }
+
+                            self.b.ldr(Reg::R0, stack_offset(condition_storage));
+                            self.b.str(Reg::R0, stack_offset(offset));
+                        }
+
+                        self.free_local(condition_storage);
+                    }
                 }
             }
 
@@ -831,16 +889,26 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             Expr::BinaryOp(op, left, right) => match op {
                 BinaryOp::AndThen => self.type_of_expr(&right),
                 BinaryOp::Assign => self.type_of_expr(&left),
-                BinaryOp::BooleanEqual => CType::AsIs(CBuiltinType::Bool.into()),
+                BinaryOp::LogicEqual => CType::AsIs(CBuiltinType::Bool.into()),
                 BinaryOp::LessThan => CType::AsIs(CBuiltinType::Bool.into()),
                 BinaryOp::Plus => todo!("numeric type implicit conversion rules"),
-
                 BinaryOp::ArrayIndex => match self.type_of_expr(&left) {
                     CType::AsIs(_) => panic!("Can't index a concrete type as an array!"),
                     CType::PointerTo(inner) | CType::ArrayOf(inner, _) => {
                         self.generator.program.get_ctype(inner)
                     }
                 },
+                BinaryOp::Minus => todo!(),
+                BinaryOp::BitwiseLeftShift => todo!(),
+                BinaryOp::BitwiseRightShift => todo!(),
+                BinaryOp::LessOrEqual => todo!(),
+                BinaryOp::GreaterThan => todo!(),
+                BinaryOp::GreaterOrEqual => todo!(),
+                BinaryOp::BitwiseXor => todo!(),
+                BinaryOp::BitwiseAnd => todo!(),
+                BinaryOp::BitwiseOr => todo!(),
+                BinaryOp::LogicAnd => todo!(),
+                BinaryOp::LogicOr => todo!(),
             },
 
             Expr::UnaryOp(op, expr) => match op {

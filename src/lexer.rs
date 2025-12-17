@@ -96,7 +96,6 @@ impl<'a> Lexer<'a> {
             '[' => Some(TokenKind::OpenSquare),
             ']' => Some(TokenKind::CloseSquare),
             ';' => Some(TokenKind::Semicolon),
-            '&' => Some(TokenKind::Ampersand),
             '*' => Some(TokenKind::Star),
             ',' => Some(TokenKind::Comma),
             '<' => Some(TokenKind::LessThan),
@@ -107,6 +106,22 @@ impl<'a> Lexer<'a> {
             _ => None,
         }) {
             return basic_token;
+        }
+
+        if self.accept_char('&') {
+            return if self.accept_char('&') {
+                TokenKind::BooleanAnd
+            } else {
+                TokenKind::Ampersand
+            };
+        }
+
+        if self.accept_char('|') {
+            return if self.accept_char('|') {
+                TokenKind::BooleanOr
+            } else {
+                TokenKind::BitwiseOr
+            };
         }
 
         if self.accept_char('/') {

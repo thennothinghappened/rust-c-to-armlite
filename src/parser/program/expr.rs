@@ -16,36 +16,59 @@ pub enum Expr {
 }
 
 pub trait BindingPower {
-    fn binding_power(&self) -> i32;
+    fn binding_strength(&self) -> i32;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
-    /// Comma operator: evaluate LHS, discard, evaluate RHS, return.
-    AndThen,
+    ArrayIndex,
+
+    Plus,
+    Minus,
+    BitwiseLeftShift,
+    BitwiseRightShift,
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
+    LogicEqual,
+    BitwiseXor,
+    BitwiseAnd,
+    BitwiseOr,
+    LogicAnd,
+    LogicOr,
 
     /// Assign whatever LHS resolves to, to the evaluated value of RHS, and return that value.
     Assign,
 
-    BooleanEqual,
-
-    LessThan,
-
-    Plus,
-
-    ArrayIndex,
+    /// Comma operator: evaluate LHS, discard, evaluate RHS, return.
+    AndThen,
 }
 
 impl BindingPower for BinaryOp {
-    fn binding_power(&self) -> i32 {
-        // Inverse of https://en.cppreference.com/w/c/language/operator_precedence.html
-        match self {
-            BinaryOp::AndThen => 0,
-            BinaryOp::Assign => 1,
-            BinaryOp::BooleanEqual => 7,
-            BinaryOp::LessThan => 8,
-            BinaryOp::Plus => 13,
-            BinaryOp::ArrayIndex => 14,
+    fn binding_strength(&self) -> i32 {
+        // https://en.cppreference.com/w/c/language/operator_precedence.html
+        //
+        // Just for sanity since we do it as higher number -> higher strength, we'll just subtract
+        // from the highest value and use their values.
+        15 - match self {
+            Self::ArrayIndex => 1,
+            Self::Minus => 4,
+            Self::Plus => 4,
+            Self::BitwiseRightShift => 5,
+            Self::BitwiseLeftShift => 5,
+            Self::LessThan => 6,
+            Self::LessOrEqual => 6,
+            Self::GreaterThan => 6,
+            Self::GreaterOrEqual => 6,
+            Self::LogicEqual => 7,
+            Self::BitwiseAnd => 8,
+            Self::BitwiseXor => 9,
+            Self::BitwiseOr => 10,
+            Self::LogicAnd => 11,
+            Self::LogicOr => 12,
+            Self::Assign => 14,
+            Self::AndThen => 15,
         }
     }
 }
@@ -94,10 +117,21 @@ impl Display for Expr {
             Expr::BinaryOp(op, lhs, rhs) => match op {
                 BinaryOp::AndThen => write!(f, "{lhs}, {rhs}"),
                 BinaryOp::Assign => write!(f, "{lhs} = {rhs}"),
-                BinaryOp::BooleanEqual => write!(f, "{lhs} == {rhs}"),
-                BinaryOp::LessThan => write!(f, "{lhs} < {rhs}"),
+                BinaryOp::LogicEqual => write!(f, "{lhs} == {rhs}"),
                 BinaryOp::Plus => write!(f, "{lhs} + {rhs}"),
+                BinaryOp::Minus => write!(f, "{lhs} - {rhs}"),
                 BinaryOp::ArrayIndex => write!(f, "{lhs}[{rhs}]"),
+                BinaryOp::BitwiseLeftShift => write!(f, "{lhs} << {rhs}"),
+                BinaryOp::BitwiseRightShift => write!(f, "{lhs} >> {rhs}"),
+                BinaryOp::LessThan => write!(f, "{lhs} < {rhs}"),
+                BinaryOp::LessOrEqual => write!(f, "{lhs} <= {rhs}"),
+                BinaryOp::GreaterThan => write!(f, "{lhs} > {rhs}"),
+                BinaryOp::GreaterOrEqual => write!(f, "{lhs} >= {rhs}"),
+                BinaryOp::BitwiseXor => write!(f, "{lhs} ^ {rhs}"),
+                BinaryOp::BitwiseAnd => write!(f, "{lhs} & {rhs}"),
+                BinaryOp::BitwiseOr => write!(f, "{lhs} | {rhs}"),
+                BinaryOp::LogicAnd => write!(f, "{lhs} && {rhs}"),
+                BinaryOp::LogicOr => write!(f, "{lhs} || {rhs}"),
             },
 
             Expr::Cast(expr, type_id) => write!(f, "({type_id:?}){expr}"),
