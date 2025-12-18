@@ -136,11 +136,11 @@ impl Program {
     }
 
     pub fn get_ctype(&self, id: CTypeId) -> CType {
-        self.ctypes
+        *self
+            .ctypes
             .borrow()
             .get(&id)
             .expect("Getting a CType by its ID should NEVER fail or we're out of sync")
-            .clone()
     }
 
     pub fn get_struct(&self, id: CStructId) -> &CStruct {

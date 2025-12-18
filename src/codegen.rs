@@ -21,7 +21,7 @@ use crate::{
     parser::program::{
         expr::{call::Call, BinaryOp, Expr, UnaryOp},
         statement::{Block, Statement, Variable},
-        types::{CBuiltinType, CConcreteType, CFunc, CFuncType, CType},
+        types::{CBuiltinType, CConcreteType, CFunc, CFuncType, CType, CTypeId},
         Program, Symbol,
     },
 };
@@ -120,7 +120,12 @@ impl Generator {
         self.file_builder.build()
     }
 
-    fn sizeof_ctype(&self, ctype: CType) -> u32 {
+    fn sizeof_ctype(&self, ctype: impl Into<CTypeOrId>) -> u32 {
+        let ctype = match ctype.into() {
+            CTypeOrId::CType(ctype) => ctype,
+            CTypeOrId::Id(ctype_id) => self.program.get_ctype(ctype_id),
+        };
+
         if let Some(size) = self.ctype_size_cache.borrow().get(&ctype) {
             return *size;
         }
@@ -172,5 +177,22 @@ impl Generator {
 
         self.ctype_size_cache.borrow_mut().insert(ctype, size);
         size
+    }
+}
+
+enum CTypeOrId {
+    CType(CType),
+    Id(CTypeId),
+}
+
+impl From<CType> for CTypeOrId {
+    fn from(value: CType) -> Self {
+        CTypeOrId::CType(value)
+    }
+}
+
+impl From<CTypeId> for CTypeOrId {
+    fn from(value: CTypeId) -> Self {
+        CTypeOrId::Id(value)
     }
 }

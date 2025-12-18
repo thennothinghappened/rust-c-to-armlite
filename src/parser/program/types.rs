@@ -136,6 +136,12 @@ impl From<CBuiltinType> for CType {
     }
 }
 
+impl From<CFuncTypeId> for CType {
+    fn from(value: CFuncTypeId) -> Self {
+        Self::AsIs(CConcreteType::Func(value))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CFuncType {
     pub args: Vec<Member>,

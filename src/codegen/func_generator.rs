@@ -487,12 +487,12 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 panic!("Reference to undefined variable `{name}`");
             }
 
-            Expr::Call(Call {
-                target,
-                args,
-                sig_id,
-            }) => {
-                let sig = self.generator.program.get_cfunc_sig(*sig_id);
+            Expr::Call(Call { target, args }) => {
+                let CType::AsIs(CConcreteType::Func(sig_id)) = self.type_of_expr(target) else {
+                    todo!("bad call target!");
+                };
+
+                let sig = self.generator.program.get_cfunc_sig(sig_id);
 
                 // push args to stack first. caller pushes args, callee expected to pop em. args
                 // pushed last first, so top of stack is the first argument.
@@ -544,7 +544,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         // Resolve the function pointer.
                         self.generate_expr(
                             expr,
-                            Some((temp_fn_ptr_var, CType::AsIs(CConcreteType::Func(*sig_id)))),
+                            Some((temp_fn_ptr_var, CType::AsIs(CConcreteType::Func(sig_id)))),
                         );
 
                         self.b.ldr(Reg::R0, stack_offset(temp_fn_ptr_var));
@@ -884,7 +884,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 panic!("Can't get the ctype of the undefined variable `{name}`")
             }
 
-            Expr::Call(call) => CType::AsIs(CConcreteType::Func(call.sig_id)),
+            Expr::Call(call) => self.type_of_expr(&call.target),
 
             Expr::BinaryOp(op, left, right) => match op {
                 BinaryOp::AndThen => self.type_of_expr(&right),

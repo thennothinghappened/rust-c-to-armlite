@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use thiserror::Error;
 
 use crate::{
@@ -8,9 +10,10 @@ use crate::{
             expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
             statement::{Block, Statement, Variable},
             types::{
-                CBuiltinType, CConcreteType, CFunc, CFuncType, CStruct, CType, Member, TypeDef,
+                CBuiltinType, CConcreteType, CFunc, CFuncType, CFuncTypeId, CStruct, CType, Member,
+                TypeDef,
             },
-            Program, StructBuilder,
+            Program, StructBuilder, Symbol,
         },
     },
     span::Span,
@@ -180,7 +183,7 @@ impl<'a> Parser<'a> {
 
         // Evil right-associative pointer syntax >:(((
         while self.accept(TokenKind::Star) {
-            this_type = CType::PointerTo(self.program.ctype_id_of(this_type)).into();
+            this_type = CType::PointerTo(self.program.ctype_id_of(this_type));
         }
 
         Ok(this_type)
@@ -217,7 +220,7 @@ impl<'a> Parser<'a> {
         self.expect(TokenKind::OpenCurly)?;
         self.consume_semicolons();
 
-        let mut block_builder = BlockBuilder::new();
+        let mut scope = BlockBuilder::new();
 
         loop {
             self.consume_semicolons();
@@ -226,19 +229,16 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            statements.push(self.parse_statement(&mut block_builder)?);
+            statements.push(self.parse_statement(&mut scope)?);
         }
 
         Ok(Block {
             statements,
-            vars: block_builder.build(),
+            vars: scope.build(),
         })
     }
 
-    fn parse_statement(
-        &mut self,
-        block_builder: &mut BlockBuilder,
-    ) -> Result<Statement, ParseError> {
+    fn parse_statement(&mut self, scope: &mut BlockBuilder) -> Result<Statement, ParseError> {
         match self.peek().kind {
             TokenKind::OpenCurly => Ok(self.parse_block()?.into()),
 
@@ -246,7 +246,7 @@ impl<'a> Parser<'a> {
                 self.next();
 
                 let condition = self.parse_expr_in_brackets()?;
-                let if_true = self.parse_statement(block_builder)?;
+                let if_true = self.parse_statement(scope)?;
 
                 if !self.accept(TokenKind::Else) {
                     return Ok(Statement::If {
@@ -256,7 +256,7 @@ impl<'a> Parser<'a> {
                     });
                 };
 
-                let if_false = self.parse_statement(block_builder)?;
+                let if_false = self.parse_statement(scope)?;
 
                 Ok(Statement::If {
                     condition: Box::new(condition),
@@ -269,7 +269,7 @@ impl<'a> Parser<'a> {
                 self.next();
 
                 let condition = self.parse_expr_in_brackets()?;
-                let block = self.parse_statement(block_builder)?;
+                let block = self.parse_statement(scope)?;
 
                 Ok(Statement::While {
                     condition: Box::new(condition),
@@ -306,7 +306,7 @@ impl<'a> Parser<'a> {
                 // possible interpretations, then picking the one that works.
 
                 let old_lexer = self.lexer.clone();
-                let parse_as_variable_result = self.parse_variable_decl(block_builder);
+                let parse_as_variable_result = self.parse_variable_decl(scope);
 
                 if let Ok(decl) = parse_as_variable_result {
                     self.expect(TokenKind::Semicolon)?;
@@ -330,10 +330,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_variable_decl(
-        &mut self,
-        block_builder: &mut BlockBuilder,
-    ) -> Result<Statement, ParseError> {
+    fn parse_variable_decl(&mut self, scope: &mut BlockBuilder) -> Result<Statement, ParseError> {
         let initial_type = self.parse_type()?;
 
         // todo: support multiple decls on same line (ew)
@@ -345,7 +342,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        block_builder.declare_var(var_name.clone(), var_ctype);
+        scope.declare_var(var_name.clone(), var_ctype);
 
         Ok(Statement::Declare(Variable {
             name: var_name,
@@ -436,14 +433,8 @@ impl<'a> Parser<'a> {
                     }
                 }
 
-                let sig_id = match &self.resolve_ctype(&operand)? {
-                    CType::AsIs(CConcreteType::Func(id)) => *id,
-                    ctype => return self.error(format!("{ctype:?} is not a function type")),
-                };
-
                 operand = Expr::Call(Call {
                     target: Box::new(operand),
-                    sig_id,
                     args,
                 });
 
@@ -717,62 +708,6 @@ impl<'a> Parser<'a> {
             span: self.lexer.index.into(),
             kind: ParseErrorKind::Lazy(message.into()),
         })
-    }
-
-    fn resolve_ctype(&self, expr: &Expr) -> Result<CType, ParseError> {
-        match &expr {
-            Expr::StringLiteral(_) => self.error("tried calling a string"),
-            Expr::IntLiteral(_) => self.error("tried calling a number"),
-
-            Expr::Reference(name) => {
-                // aaaaaaaaaaaaaaaaaaaaaaaaaaaa help we need contexttttt
-
-                // FIXME FIXME FIXME: pretending everything is global!!!!!!!!
-                let Some(symbol) = self.program.get_symbol(name) else {
-                    return self.error(format!("couldn't resolve reference to `{name}`"));
-                };
-
-                match symbol {
-                    program::Symbol::Func(cfunc) => Ok(CType::AsIs(cfunc.sig_id.into())),
-                    program::Symbol::Var(ctype, _) => Ok(*ctype),
-                }
-            }
-
-            Expr::Call(call) => Ok(self.program.get_cfunc_sig(call.sig_id).returns),
-
-            Expr::BinaryOp(op, left, right) => match op {
-                BinaryOp::AndThen | BinaryOp::Assign => self.resolve_ctype(right),
-                BinaryOp::LogicEqual | BinaryOp::LessThan => {
-                    Ok(CType::AsIs(CBuiltinType::Bool.into()))
-                }
-                BinaryOp::Plus => self.resolve_ctype(left),
-                BinaryOp::ArrayIndex => match self.resolve_ctype(left)? {
-                    CType::PointerTo(element_ctype) => Ok(self.program.get_ctype(element_ctype)),
-
-                    CType::ArrayOf(element_ctype, _) => Ok(self.program.get_ctype(element_ctype)),
-
-                    ctype => self.error(format!("cant index non-array/ptr type {ctype:#?}")),
-                },
-                BinaryOp::Minus => todo!(),
-                BinaryOp::BitwiseLeftShift => todo!(),
-                BinaryOp::BitwiseRightShift => todo!(),
-                BinaryOp::LessOrEqual => todo!(),
-                BinaryOp::GreaterThan => todo!(),
-                BinaryOp::GreaterOrEqual => todo!(),
-                BinaryOp::BitwiseXor => todo!(),
-                BinaryOp::BitwiseAnd => todo!(),
-                BinaryOp::BitwiseOr => todo!(),
-                BinaryOp::LogicAnd => todo!(),
-                BinaryOp::LogicOr => todo!(),
-            },
-
-            Expr::UnaryOp(op, expr) => todo!(),
-
-            // fixme: blindly accepting whatever the programmer is saying here right now! we really
-            // should define a stricter ast that simply doesn't allow invalid constructs, like
-            // casting a struct to a number, for instance.
-            Expr::Cast(_, ctype) => Ok(*ctype),
-        }
     }
 }
 

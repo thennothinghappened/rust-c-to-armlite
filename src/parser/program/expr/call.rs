@@ -9,7 +9,6 @@ use crate::parser::program::{
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Call {
-    pub sig_id: CFuncTypeId,
     pub target: Box<Expr>,
     pub args: Vec<Expr>,
 }
