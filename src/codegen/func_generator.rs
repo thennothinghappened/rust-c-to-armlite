@@ -4,7 +4,10 @@ use anyhow::bail;
 use itertools::Itertools;
 
 use crate::{
-    codegen::{func_builder::FuncBuilder, Address, Generator, Reg, WORD_SIZE},
+    codegen::{
+        func_builder::{FuncBuilder, LabelId},
+        Address, Generator, Reg, WORD_SIZE,
+    },
     parser::program::{
         expr::{call::Call, BinaryOp, Expr, UnaryOp},
         statement::{Block, Statement},
@@ -14,8 +17,8 @@ use crate::{
 };
 
 struct Breakable {
-    loop_label: String,
-    done_label: String,
+    loop_label: LabelId,
+    done_label: LabelId,
 }
 
 pub(super) struct FuncGenerator<'a, 'b> {
@@ -25,10 +28,13 @@ pub(super) struct FuncGenerator<'a, 'b> {
     named_vars: HashMap<String, StackLocal>,
     frame: Vec<(u32, bool)>,
     breakable_stack: VecDeque<Breakable>,
+    done_label: LabelId,
 }
 
 impl<'a, 'b> FuncGenerator<'a, 'b> {
     pub fn new(generator: &'b Generator, builder: &'b mut FuncBuilder<'a>) -> Self {
+        let done_label = builder.create_label("done");
+
         Self {
             generator,
             b: builder,
@@ -36,6 +42,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             named_vars: HashMap::default(),
             frame: Vec::default(),
             breakable_stack: VecDeque::default(),
+            done_label,
         }
     }
 
@@ -167,7 +174,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
         self.generate_block(block)?;
 
-        self.b.label("done");
+        self.b.label(self.done_label);
         self.b.mov(Reg::Sp, Reg::R11);
         self.b.pop(&[Reg::R11, Reg::LinkReg]);
 
@@ -235,7 +242,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.free_local(temp_storage);
 
                 self.b.inline_comment("Perform the cleanup.");
-                self.b.b("done");
+                self.b.b(self.done_label);
 
                 self.b.comment("</return>");
             }
@@ -246,8 +253,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     .breakable_stack
                     .back()
                     .expect("break can't be used outside a breakable")
-                    .done_label
-                    .clone());
+                    .done_label);
             }
 
             Statement::Continue => {
@@ -256,8 +262,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     .breakable_stack
                     .back()
                     .expect("continue can't be used outside a breakable")
-                    .loop_label
-                    .clone());
+                    .loop_label);
             }
 
             Statement::If {
@@ -265,8 +270,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 if_true,
                 if_false,
             } => {
-                let if_false_label = self.b.anonymise("If__else");
-                let done_label = self.b.anonymise("If__done");
+                let if_false_label = self.b.create_label("If__else");
+                let done_label = self.b.create_label("If__done");
 
                 self.b.comment(format!("if ({condition})"));
 
@@ -285,16 +290,16 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.cmp(Reg::R0, 0);
 
                 if if_false.is_some() {
-                    self.b.beq(if_false_label.clone());
+                    self.b.beq(if_false_label);
                 } else {
-                    self.b.beq(done_label.clone());
+                    self.b.beq(done_label);
                 }
 
                 self.b.comment("then");
                 self.generate_stmt(if_true)?;
 
                 if let Some(if_false) = if_false {
-                    self.b.b(done_label.clone());
+                    self.b.b(done_label);
 
                     self.b.comment("else");
                     self.b.label(if_false_label);
@@ -306,18 +311,18 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             }
 
             Statement::While { condition, block } => {
-                let loop_label = self.b.anonymise("While__loop");
-                let done_label = self.b.anonymise("While__done");
+                let loop_label = self.b.create_label("While__loop");
+                let done_label = self.b.create_label("While__done");
 
                 self.breakable_stack.push_back(Breakable {
-                    loop_label: loop_label.clone(),
-                    done_label: done_label.clone(),
+                    loop_label,
+                    done_label,
                 });
 
                 self.b.comment(format!("while ({condition})"));
                 let temp_condition_storage = self.allocate_anon(4);
 
-                self.b.label(loop_label.clone());
+                self.b.label(loop_label);
                 self.generate_expr(
                     condition,
                     Some((
@@ -328,7 +333,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 self.b.ldr(Reg::R0, stack_offset(temp_condition_storage));
                 self.b.cmp(Reg::R0, 0);
-                self.b.beq(done_label.clone());
+                self.b.beq(done_label);
 
                 self.b.comment("do");
                 self.generate_stmt(block)?;
@@ -873,7 +878,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 let condition_storage = self.allocate_anon(WORD_SIZE);
 
-                let done_label = self.b.anonymise(if is_and {
+                let done_label = self.b.create_label(if is_and {
                     "LogicAnd__done"
                 } else {
                     "LogicOr__done"
@@ -887,10 +892,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.cmp(Reg::R0, 0);
 
                 if is_and {
-                    self.b.beq(done_label.clone());
+                    self.b.beq(done_label);
                     self.b.comment("LHS is truthy, evaluate RHS");
                 } else {
-                    self.b.bne(done_label.clone());
+                    self.b.bne(done_label);
                     self.b.comment("LHS is falsey, evaluate RHS");
                 }
 

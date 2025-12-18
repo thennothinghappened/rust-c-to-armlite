@@ -12,16 +12,16 @@ use crate::{
     parser::program::types::CFuncType,
 };
 
-id_type!(AnonLabelId);
 id_type!(LabelId);
 
 pub(crate) struct FuncBuilder<'a> {
     pub sig: &'a CFuncType,
-    instructions: Vec<Inst>,
     name: &'a str,
-    next_anon_label_id: Cell<AnonLabelId>,
-    labels: BiMap<LabelId, String>,
+    instructions: Vec<Inst>,
     doc_comment: Vec<String>,
+
+    labels: BiMap<LabelId, String>,
+    next_label_id: Cell<LabelId>,
 }
 
 impl<'a> FuncBuilder<'a> {
@@ -31,17 +31,9 @@ impl<'a> FuncBuilder<'a> {
             instructions: Vec::new(),
             sig,
             name,
-            next_anon_label_id: Cell::default(),
+            next_label_id: Cell::default(),
             labels: BiMap::default(),
         }
-    }
-
-    pub fn anonymise<'brief>(&self, name: impl Into<&'brief str>) -> String {
-        format!(
-            "{}_{}",
-            name.into(),
-            self.next_anon_label_id.get_and_increment().0
-        )
     }
 
     pub fn append_doc_line(&mut self, line: impl Into<String>) {
@@ -61,8 +53,15 @@ impl<'a> FuncBuilder<'a> {
         self.append(Inst::InlineComment(comment.into()))
     }
 
-    pub fn label(&mut self, name: impl Into<String>) -> &mut Self {
-        self.append(Inst::Label(name.into()))
+    pub fn create_label<'brief>(&mut self, name: impl Into<String>) -> LabelId {
+        let id = self.next_label_id.get_and_increment();
+        self.labels.insert(id, name.into());
+
+        id
+    }
+
+    pub fn label(&mut self, id: LabelId) -> &mut Self {
+        self.append(Inst::Label(id))
     }
 
     pub fn asm(&mut self, asm: impl Into<String>) -> &mut Self {
@@ -161,17 +160,22 @@ impl<'a> FuncBuilder<'a> {
         format!("{self}")
     }
 
-    fn format_label(&self, label: &str) -> String {
-        format!("L{label}__{}", self.name)
+    fn format_label(&self, id: LabelId) -> String {
+        format!(
+            "L{}_{}__{}",
+            self.labels.get_by_left(&id).unwrap(),
+            id.0,
+            self.name
+        )
     }
 
     fn format_branch_target(&self, target: &BranchTarget) -> String {
         match target {
-            BranchTarget::Label(name) => self.format_label(name),
+            BranchTarget::Label(id) => self.format_label(*id),
             BranchTarget::Relative(offset) => {
                 format!(".{}{}", if *offset >= 0 { '+' } else { '-' }, offset.abs())
             }
-            BranchTarget::ExternalLabel(name) => format!("#{name}"),
+            BranchTarget::VerbatimLabel(name) => format!("#{name}"),
         }
     }
 
@@ -205,7 +209,7 @@ impl<'a> Display for FuncBuilder<'a> {
                     inline_comments.push(text);
                     Ok(())
                 }
-                Inst::Label(name) => write!(f, "{}:", self.format_label(name)),
+                Inst::Label(id) => write!(f, "{}:", self.format_label(*id)),
                 Inst::Mov(dest, src) => write!(f, "\tMOV {dest}, {src}"),
                 Inst::Add(dest, left, right) => write!(f, "\tADD {dest}, {left}, {right}"),
                 Inst::Sub(dest, left, right) => write!(f, "\tSUB {dest}, {left}, {right}"),

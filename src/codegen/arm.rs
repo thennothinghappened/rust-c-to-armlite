@@ -3,19 +3,18 @@ use std::{fmt::Display, ops::Add};
 use itertools::Itertools;
 
 use crate::{
-    codegen::{arm::file_builder::StringId, Generator},
+    codegen::{arm::file_builder::StringId, func_builder::LabelId, Generator},
     parser::program::types::{CFunc, CFuncType},
 };
 
 pub(super) mod file_builder;
 pub(super) mod func_builder;
 
-#[derive(Clone)]
 pub(super) enum Inst {
     InlineAsm(String),
     Comment(String),
     InlineComment(String),
-    Label(String),
+    Label(LabelId),
     Mov(Reg, RegOrImmediate),
     Add(Reg, Reg, RegOrImmediate),
     Sub(Reg, Reg, RegOrImmediate),
@@ -42,20 +41,14 @@ pub(super) enum Inst {
 
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum BranchTarget {
-    Label(String),
+    Label(LabelId),
     Relative(i32),
-    ExternalLabel(String),
+    VerbatimLabel(String),
 }
 
-impl From<String> for BranchTarget {
-    fn from(value: String) -> Self {
+impl From<LabelId> for BranchTarget {
+    fn from(value: LabelId) -> Self {
         BranchTarget::Label(value)
-    }
-}
-
-impl From<&str> for BranchTarget {
-    fn from(value: &str) -> Self {
-        BranchTarget::Label(value.to_owned())
     }
 }
 
