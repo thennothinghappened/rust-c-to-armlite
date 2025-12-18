@@ -20,7 +20,7 @@ pub(crate) struct FuncBuilder<'a> {
     instructions: Vec<Inst>,
     doc_comment: Vec<String>,
 
-    labels: BiMap<LabelId, String>,
+    labels: HashMap<LabelId, String>,
     next_label_id: Cell<LabelId>,
 }
 
@@ -32,7 +32,7 @@ impl<'a> FuncBuilder<'a> {
             sig,
             name,
             next_label_id: Cell::default(),
-            labels: BiMap::default(),
+            labels: HashMap::default(),
         }
     }
 
@@ -53,7 +53,7 @@ impl<'a> FuncBuilder<'a> {
         self.append(Inst::InlineComment(comment.into()))
     }
 
-    pub fn create_label<'brief>(&mut self, name: impl Into<String>) -> LabelId {
+    pub fn create_label(&mut self, name: impl Into<String>) -> LabelId {
         let id = self.next_label_id.get_and_increment();
         self.labels.insert(id, name.into());
 
@@ -161,12 +161,7 @@ impl<'a> FuncBuilder<'a> {
     }
 
     fn format_label(&self, id: LabelId) -> String {
-        format!(
-            "L{}_{}__{}",
-            self.labels.get_by_left(&id).unwrap(),
-            id.0,
-            self.name
-        )
+        format!("L{}_{}__{}", self.labels[&id], id.0, self.name)
     }
 
     fn format_branch_target(&self, target: &BranchTarget) -> String {
