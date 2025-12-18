@@ -58,20 +58,16 @@ static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
         b.asm("STR R0, .ReadString");
         b.ret();
     },
-    "add" => |b| {
-        b.pop(&[Reg::R0, Reg::R1]);
-        b.add(Reg::R0, Reg::R0, Reg::R1);
-        b.ret();
+    "Panic" => |b| {
+        b.asm("MOV R0, #const_str_PanicMessage");
+        b.asm("STR R0, .WriteString");
+        b.call("WriteString");
+        b.asm("B c_halt");
+        b.asm("const_str_PanicMessage: .ASCIZ \"\\n\\nProgram panicked with error message: \"");
     },
-    "if_" => |b| {
-        b.pop(&[Reg::R0, Reg::R1, Reg::R2]);
-
-        b.cmp(Reg::R2, 0);
-        b.beq("if_false");
-        b.mov(Reg::ProgCounter, Reg::R1);
-
-        b.label("if_false");
-        b.mov(Reg::ProgCounter, Reg::R0);
+    "Exit" => |b| {
+        b.pop(&[Reg::R0]);
+        b.asm("B c_entry_post_run");
     },
 };
 

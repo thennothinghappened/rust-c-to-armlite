@@ -17,6 +17,7 @@ const PRELUDE: &str = r#"
 
 c_entry:
 	BL fn_main
+c_entry_post_run:
 	MOV R4, R0						; Grab the return code.
 
 	MOV R0, #const_c_entry_exitcode_msg_start
