@@ -1,4 +1,4 @@
-use crate::lexer::Lexer;
+use crate::lexer::{tokenkind::TokenKind, Lexer};
 
 impl<'a> Lexer<'a> {
     pub(super) fn take_chars_while<F>(&mut self, mut predicate: F) -> &'a str
@@ -28,6 +28,13 @@ impl<'a> Lexer<'a> {
         F: Fn(char) -> bool,
     {
         self.take_chars_while(|char| !predicate(char))
+    }
+
+    pub(super) fn take_chars(&mut self, count: usize) -> &'a str {
+        let slice = &self.chars.as_str()[0..count];
+        self.chars.nth(count - 1);
+
+        slice
     }
 
     pub(super) fn accept_char(&mut self, expected: char) -> bool {
@@ -84,6 +91,47 @@ impl<'a> Lexer<'a> {
 
         false
     }
+
+    pub(super) fn consume_c_escape(&mut self) -> Option<char> {
+        let code = match self.peek_char()? {
+            'a' => 0x07.into(),
+            'b' => 0x08.into(),
+            'e' => 0x1B.into(),
+            'f' => 0x0C.into(),
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            'v' => 0x0B.into(),
+            '0' => 0.into(),
+
+            // TODO: Support numeric escape sequences.
+            // 'x' => {
+            //     self.next_char();
+            //     let chars = self.take_chars_while(|char| char.is_ascii_hexdigit());
+            //     let num = u8::from_str_radix(chars, 16).unwrap();
+
+            //     return Some(char::from(num));
+            // }
+
+            // 'u' => {
+            //     self.next_char();
+
+            //     todo!()
+            // }
+
+            // first_octal if is_octal(first_octal) => {
+            //     self.next_char();
+            //     let octal_str = self.take_chars(3);
+
+            //     u8
+            //     todo!()
+            // }
+            plain => plain,
+        };
+
+        self.next_char();
+        Some(code)
+    }
 }
 
 pub(super) fn is_valid_identifier(char: char) -> bool {
@@ -100,4 +148,14 @@ pub(super) fn is_whitespace_or_newline(char: char) -> bool {
 
 pub(super) fn is_newline(char: char) -> bool {
     char == '\n' || char == '\r'
+}
+
+fn is_octal(char: char) -> bool {
+    if let Ok(ascii_index) = u8::try_from(char) {
+        if (b'0'..=b'7').contains(&ascii_index) {
+            return true;
+        }
+    }
+
+    false
 }

@@ -279,6 +279,24 @@ impl<'a> Lexer<'a> {
             return TokenKind::StringLiteral(self.context.allocate_ident(content));
         }
 
+        if self.accept_char('\'') {
+            let Some(char) = (if self.accept_char('\\') {
+                self.consume_c_escape()
+            } else {
+                self.next_char()
+            }) else {
+                return TokenKind::Eof;
+            };
+
+            self.consume_char('\'');
+
+            // NOTE: Questionable goings on here.
+            let mut buf: [u8; 4] = [0, 0, 0, 0];
+            char.encode_utf8(&mut buf);
+
+            return TokenKind::IntLiteral(i32::from_le_bytes(buf));
+        }
+
         if char.is_numeric() {
             // TODO: support 0x, 0b, etc.
             let int = self.take_chars_while(char::is_numeric).parse().unwrap();
