@@ -38,6 +38,8 @@ fn main() {
 
         if let Some(out_path) = args().nth(2) {
             fs::write(out_path, output).expect("Failed to write output asm file");
+        } else {
+            println!("--- Code generated ---\n{output}");
         }
 
         return;
@@ -56,7 +58,9 @@ fn main() {
             }
         }
 
-        parse_program(buf, None, &codespan_writer, &codespan_config);
+        if let Some(output) = parse_program(buf, None, &codespan_writer, &codespan_config) {
+            println!("--- Code generated ---\n{output}");
+        }
     }
 }
 
@@ -106,8 +110,5 @@ fn parse_program(
 
     println!("Program: {program}");
 
-    let output = codegen::Generator::new(program).generate();
-    println!("--- Code generated ---\n{output}");
-
-    return Some(output);
+    Some(codegen::Generator::new(program).generate())
 }
