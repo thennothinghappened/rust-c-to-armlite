@@ -46,16 +46,17 @@ fn main() {
     let stdin = stdin();
 
     loop {
+        let mut buf = String::new();
+
         loop {
-            let mut buf = String::new();
             stdin.read_line(&mut buf).unwrap();
 
             if buf.trim_end().ends_with(";;") {
                 break;
             }
-
-            parse_program(buf, None, &codespan_writer, &codespan_config);
         }
+
+        parse_program(buf, None, &codespan_writer, &codespan_config);
     }
 }
 
