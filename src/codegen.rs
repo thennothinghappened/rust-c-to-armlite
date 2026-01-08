@@ -58,6 +58,29 @@ static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
         b.asm("STR R0, .ReadString");
         b.ret();
     },
+    "memcpy" => |b| {
+        let loop_label = b.create_label("loop");
+        let done_label = b.create_label("done");
+
+        b.comment("R0: Destination address");
+        b.comment("R1: Source address");
+        b.comment("R2: Byte count");
+        b.pop([Reg::R0, Reg::R1, Reg::R2]);
+
+        b.comment("Check if caller asked us to copy 0 bytes for some reason.");
+        b.cmp(Reg::R2, 0);
+        b.beq(done_label);
+
+        b.label(loop_label);
+        b.asm("SUBS R2, R2, #1");
+        b.beq(done_label);
+        b.ldrb(Reg::R3, Reg::R1 + Reg::R2);
+        b.strb(Reg::R3, Reg::R0 + Reg::R2);
+        b.b(loop_label);
+
+        b.label(done_label);
+        b.ret();
+    },
     "Panic" => |b| {
         b.asm("MOV R0, #const_str_PanicMessage");
         b.asm("STR R0, .WriteString");
