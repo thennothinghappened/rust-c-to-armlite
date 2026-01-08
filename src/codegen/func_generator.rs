@@ -17,9 +17,11 @@ use crate::{
     },
 };
 
+#[derive(Clone, Copy)]
 struct Breakable {
     loop_label: LabelId,
     done_label: LabelId,
+    stack_top_pos: i32,
 }
 
 pub(super) struct FuncGenerator<'a, 'b> {
@@ -273,21 +275,37 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             }
 
             Statement::Break => {
-                self.b.comment("break");
-                self.b.b(self
+                let breakable = *self
                     .breakable_stack
                     .back()
-                    .expect("break can't be used outside a breakable")
-                    .done_label);
+                    .context("break can't be used outside a breakable")?;
+
+                self.b.comment("break");
+
+                self.b.add(
+                    Reg::Sp,
+                    Reg::Sp,
+                    breakable.stack_top_pos - self.stack_top_pos,
+                );
+
+                self.b.b(breakable.done_label);
             }
 
             Statement::Continue => {
-                self.b.comment("continue");
-                self.b.b(self
+                let breakable = *self
                     .breakable_stack
                     .back()
-                    .expect("continue can't be used outside a breakable")
-                    .loop_label);
+                    .context("continue can't be used outside a breakable")?;
+
+                self.b.comment("continue");
+
+                self.b.add(
+                    Reg::Sp,
+                    Reg::Sp,
+                    breakable.stack_top_pos - self.stack_top_pos,
+                );
+
+                self.b.b(breakable.loop_label);
             }
 
             Statement::If {
@@ -333,13 +351,14 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let loop_label = self.b.create_label("While__loop");
                 let done_label = self.b.create_label("While__done");
 
+                self.b.comment(format!("while ({condition})"));
+                let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
+
                 self.breakable_stack.push_back(Breakable {
                     loop_label,
                     done_label,
+                    stack_top_pos: self.stack_top_pos,
                 });
-
-                self.b.comment(format!("while ({condition})"));
-                let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
 
                 self.b.label(loop_label);
                 self.generate_expr(condition, temp_condition_storage)?;
