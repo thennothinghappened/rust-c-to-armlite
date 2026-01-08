@@ -11,7 +11,7 @@ use crate::{
     parser::program::{
         expr::{call::Call, BinaryOp, Expr, UnaryOp},
         statement::{Block, Statement},
-        types::{CBuiltinType, CConcreteType, CFunc, CType},
+        types::{CConcreteType, CFunc, CPrimitive, CType},
         Symbol,
     },
 };
@@ -280,7 +280,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     condition,
                     Some((
                         temp_condition_storage,
-                        CType::AsIs(CConcreteType::Builtin(CBuiltinType::Bool)),
+                        CType::AsIs(CConcreteType::Primitive(CPrimitive::Bool)),
                     )),
                 )?;
 
@@ -327,7 +327,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     condition,
                     Some((
                         temp_condition_storage,
-                        CType::AsIs(CConcreteType::Builtin(CBuiltinType::Bool)),
+                        CType::AsIs(CConcreteType::Primitive(CPrimitive::Bool)),
                     )),
                 )?;
 
@@ -763,7 +763,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     right,
                     Some((
                         temp_index_storage,
-                        CType::AsIs(CConcreteType::Builtin(CBuiltinType::Int)),
+                        CType::AsIs(CConcreteType::Primitive(CPrimitive::Int)),
                     )),
                 )?;
 
@@ -774,7 +774,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         CType::PointerTo(
                             self.generator
                                 .program
-                                .ctype_id_of(CConcreteType::Builtin(CBuiltinType::Void)),
+                                .ctype_id_of(CConcreteType::Primitive(CPrimitive::Void)),
                         ),
                     )),
                 )?;
@@ -885,7 +885,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 });
 
                 self.b.comment("Evaluate LHS");
-                self.generate_expr(left, Some((condition_storage, CBuiltinType::Bool.into())))?;
+                self.generate_expr(left, Some((condition_storage, CPrimitive::Bool.into())))?;
 
                 self.b.comment("Test if LHS is truthy");
                 self.b.ldr(Reg::R0, stack_offset(condition_storage));
@@ -899,12 +899,12 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.b.comment("LHS is falsey, evaluate RHS");
                 }
 
-                self.generate_expr(right, Some((condition_storage, CBuiltinType::Bool.into())))?;
+                self.generate_expr(right, Some((condition_storage, CPrimitive::Bool.into())))?;
 
                 self.b.label(done_label);
 
                 if let Some((offset, ctype)) = result_info {
-                    if ctype != CBuiltinType::Bool.into() {
+                    if ctype != CPrimitive::Bool.into() {
                         todo!(
                             "Cast bool result to {}",
                             self.generator.program.format_ctype(ctype)
@@ -925,10 +925,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     fn type_of_expr(&self, expr: &Expr) -> anyhow::Result<CType> {
         match expr {
             Expr::StringLiteral(_) => Ok(CType::PointerTo(
-                self.generator.program.ctype_id_of(CBuiltinType::Char),
+                self.generator.program.ctype_id_of(CPrimitive::Char),
             )),
 
-            Expr::IntLiteral(_) => Ok(CBuiltinType::Int.into()),
+            Expr::IntLiteral(_) => Ok(CPrimitive::Int.into()),
 
             Expr::Reference(name) => {
                 if let Some(local) = self.get_localvar(name) {
@@ -973,7 +973,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 | BinaryOp::GreaterThan
                 | BinaryOp::GreaterOrEqual
                 | BinaryOp::LogicAnd
-                | BinaryOp::LogicOr => Ok(CBuiltinType::Bool.into()),
+                | BinaryOp::LogicOr => Ok(CPrimitive::Bool.into()),
 
                 BinaryOp::Plus | BinaryOp::Minus => {
                     let left_ctype = self.type_of_expr(left);
@@ -1002,8 +1002,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 | UnaryOp::DecrementThenGet
                 | UnaryOp::GetThenDecrement => self.type_of_expr(expr),
 
-                UnaryOp::SizeOf => Ok(CBuiltinType::Int.into()),
-                UnaryOp::BooleanNot => Ok(CBuiltinType::Bool.into()),
+                UnaryOp::SizeOf => Ok(CPrimitive::Int.into()),
+                UnaryOp::BooleanNot => Ok(CPrimitive::Bool.into()),
                 UnaryOp::Negative => self.type_of_expr(expr),
 
                 UnaryOp::AddressOf => Ok(CType::PointerTo(

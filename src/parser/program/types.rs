@@ -24,11 +24,11 @@ pub enum CConcreteType {
     Struct(CStructId),
     Enum(CEnumId),
     Func(CFuncTypeId),
-    Builtin(CBuiltinType),
+    Primitive(CPrimitive),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CBuiltinType {
+pub enum CPrimitive {
     Void,
     Bool,
     Char,
@@ -47,7 +47,7 @@ pub enum CBuiltinType {
     LongDouble,
 }
 
-impl CBuiltinType {
+impl CPrimitive {
     /// Convert this type to an unsigned version, if one exists.
     pub fn unsigned(self) -> Option<Self> {
         match self {
@@ -73,36 +73,36 @@ impl CBuiltinType {
     }
 }
 
-impl Display for CBuiltinType {
+impl Display for CPrimitive {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{}",
             match self {
-                CBuiltinType::Void => "void",
-                CBuiltinType::Bool => "bool",
-                CBuiltinType::Char => "char",
-                CBuiltinType::SignedChar => "signed char",
-                CBuiltinType::UnsignedChar => "unsigned char",
-                CBuiltinType::Short => "short",
-                CBuiltinType::UnsignedShort => "unsigned short",
-                CBuiltinType::Int => "int",
-                CBuiltinType::UnsignedInt => "unsigned int",
-                CBuiltinType::Long => "long",
-                CBuiltinType::UnsignedLong => "unsigned long",
-                CBuiltinType::LongLong => "long long",
-                CBuiltinType::UnsignedLongLong => "unsigned long long",
-                CBuiltinType::Float => "float",
-                CBuiltinType::Double => "double",
-                CBuiltinType::LongDouble => "long double",
+                CPrimitive::Void => "void",
+                CPrimitive::Bool => "bool",
+                CPrimitive::Char => "char",
+                CPrimitive::SignedChar => "signed char",
+                CPrimitive::UnsignedChar => "unsigned char",
+                CPrimitive::Short => "short",
+                CPrimitive::UnsignedShort => "unsigned short",
+                CPrimitive::Int => "int",
+                CPrimitive::UnsignedInt => "unsigned int",
+                CPrimitive::Long => "long",
+                CPrimitive::UnsignedLong => "unsigned long",
+                CPrimitive::LongLong => "long long",
+                CPrimitive::UnsignedLongLong => "unsigned long long",
+                CPrimitive::Float => "float",
+                CPrimitive::Double => "double",
+                CPrimitive::LongDouble => "long double",
             }
         )
     }
 }
 
-impl From<CBuiltinType> for CConcreteType {
-    fn from(value: CBuiltinType) -> Self {
-        Self::Builtin(value)
+impl From<CPrimitive> for CConcreteType {
+    fn from(value: CPrimitive) -> Self {
+        Self::Primitive(value)
     }
 }
 
@@ -130,9 +130,9 @@ impl From<CConcreteType> for CType {
     }
 }
 
-impl From<CBuiltinType> for CType {
-    fn from(value: CBuiltinType) -> Self {
-        Self::AsIs(CConcreteType::Builtin(value))
+impl From<CPrimitive> for CType {
+    fn from(value: CPrimitive) -> Self {
+        Self::AsIs(CConcreteType::Primitive(value))
     }
 }
 

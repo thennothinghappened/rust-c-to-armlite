@@ -15,7 +15,7 @@ use crate::{
         expr::Expr,
         statement::{Block, Variable},
         types::{
-            CBuiltinType, CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CStruct,
+            CPrimitive, CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CStruct,
             CStructId, CType, CTypeId, Member, TypeDef,
         },
     },
@@ -246,7 +246,7 @@ impl Program {
                     )
                 }
 
-                CConcreteType::Builtin(cbuiltin_type) => format!("{cbuiltin_type}"),
+                CConcreteType::Primitive(cbuiltin_type) => format!("{cbuiltin_type}"),
             },
 
             CType::PointerTo(ctype_id) => {

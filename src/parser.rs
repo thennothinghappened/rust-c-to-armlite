@@ -10,7 +10,7 @@ use crate::{
             expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
             statement::{Block, Statement, Variable},
             types::{
-                CBuiltinType, CConcreteType, CFunc, CFuncType, CFuncTypeId, CStruct, CType, Member,
+                CConcreteType, CFunc, CFuncType, CFuncTypeId, CPrimitive, CStruct, CType, Member,
                 TypeDef,
             },
             Program, StructBuilder, Symbol,
@@ -606,7 +606,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_numeric_type(&mut self) -> Result<CBuiltinType, ParseError> {
+    fn parse_numeric_type(&mut self) -> Result<CPrimitive, ParseError> {
         if self.accept(TokenKind::Unsigned) {
             return self
                 .parse_terminal_numeric_type()?
@@ -624,14 +624,14 @@ impl<'a> Parser<'a> {
         self.parse_terminal_numeric_type()
     }
 
-    fn parse_terminal_numeric_type(&mut self) -> Result<CBuiltinType, ParseError> {
+    fn parse_terminal_numeric_type(&mut self) -> Result<CPrimitive, ParseError> {
         if let Some(basic_type) = self.maybe_map_next(|token| match token {
-            TokenKind::Void => Some(CBuiltinType::Void),
-            TokenKind::Bool => Some(CBuiltinType::Bool),
-            TokenKind::Int => Some(CBuiltinType::Int),
-            TokenKind::Char => Some(CBuiltinType::Char),
-            TokenKind::Float => Some(CBuiltinType::Float),
-            TokenKind::Double => Some(CBuiltinType::Double),
+            TokenKind::Void => Some(CPrimitive::Void),
+            TokenKind::Bool => Some(CPrimitive::Bool),
+            TokenKind::Int => Some(CPrimitive::Int),
+            TokenKind::Char => Some(CPrimitive::Char),
+            TokenKind::Float => Some(CPrimitive::Float),
+            TokenKind::Double => Some(CPrimitive::Double),
             _ => None,
         }) {
             return Ok(basic_type);
@@ -639,10 +639,10 @@ impl<'a> Parser<'a> {
 
         if self.accept(TokenKind::Short) {
             if self.accept(TokenKind::Int) {
-                return Ok(CBuiltinType::Short);
+                return Ok(CPrimitive::Short);
             }
 
-            return Ok(CBuiltinType::Short);
+            return Ok(CPrimitive::Short);
         }
 
         if self.accept(TokenKind::Long) {
@@ -651,17 +651,17 @@ impl<'a> Parser<'a> {
                 // (optional "int" suffix here)
                 self.accept(TokenKind::Int);
 
-                return Ok(CBuiltinType::LongLong);
+                return Ok(CPrimitive::LongLong);
             }
 
             if self.accept(TokenKind::Double) {
-                return Ok(CBuiltinType::LongDouble);
+                return Ok(CPrimitive::LongDouble);
             }
 
             // again, optional "int".
             self.accept(TokenKind::Int);
 
-            return Ok(CBuiltinType::Long);
+            return Ok(CPrimitive::Long);
         }
 
         Err(self.unexpected_token())
