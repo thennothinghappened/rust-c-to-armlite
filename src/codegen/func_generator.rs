@@ -169,15 +169,15 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             return Some(*offset);
         }
 
-        let mut offset: i32 = -4;
+        let mut offset: i32 = 4;
 
         if self.generator.sizeof_ctype(self.b.sig.returns) > WORD_SIZE {
             // 0th implicit argument is the return address.
-            offset -= 4;
+            offset += 4;
         }
 
         for arg in self.b.sig.args.iter() {
-            offset -= self.generator.sizeof_ctype(arg.ctype) as i32;
+            offset += self.generator.sizeof_ctype(arg.ctype) as i32;
 
             if arg.name.as_deref() == Some(name) {
                 return Some(StackLocal {
