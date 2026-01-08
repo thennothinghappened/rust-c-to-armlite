@@ -169,14 +169,14 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             panic!("Function {cfunc:?} left undefined!");
         };
 
-        self.b.push(&[Reg::R11, Reg::LinkReg]);
+        self.b.push([Reg::R11, Reg::LinkReg]);
         self.b.mov(Reg::R11, Reg::Sp);
 
         self.generate_block(block)?;
 
         self.b.label(self.done_label);
         self.b.mov(Reg::Sp, Reg::R11);
-        self.b.pop(&[Reg::R11, Reg::LinkReg]);
+        self.b.pop([Reg::R11, Reg::LinkReg]);
 
         if !self.b.sig.args.is_empty() {
             self.b.inline_comment("Eat the caller's args.");

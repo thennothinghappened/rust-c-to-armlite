@@ -39,22 +39,22 @@ static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
         b.ret();
     },
     "WriteString" => |b| {
-        b.pop(&[Reg::R0]);
+        b.pop(Reg::R0);
         b.asm("STR R0, .WriteString");
         b.ret();
     },
     "WriteSignedNum" => |b| {
-        b.pop(&[Reg::R0]);
+        b.pop(Reg::R0);
         b.asm("STR R0, .WriteSignedNum");
         b.ret();
     },
     "WriteUnsignedNum" => |b| {
-        b.pop(&[Reg::R0]);
+        b.pop(Reg::R0);
         b.asm("STR R0, .WriteUnsignedNum");
         b.ret();
     },
     "ReadString" => |b| {
-        b.pop(&[Reg::R0]);
+        b.pop(Reg::R0);
         b.asm("STR R0, .ReadString");
         b.ret();
     },
@@ -66,7 +66,7 @@ static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
         b.asm("const_str_PanicMessage: .ASCIZ \"\\n\\nProgram panicked with error message: \"");
     },
     "Exit" => |b| {
-        b.pop(&[Reg::R0]);
+        b.pop(Reg::R0);
         b.asm("B c_entry_post_run");
     },
 };

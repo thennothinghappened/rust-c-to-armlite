@@ -1,4 +1,7 @@
-use std::{fmt::Display, ops::Add};
+use std::{
+    fmt::Display,
+    ops::{Add, Sub},
+};
 
 use itertools::Itertools;
 
@@ -22,8 +25,8 @@ pub(super) enum Inst {
     Load(Reg, Address),
     StoreB(Reg, Address),
     LoadB(Reg, Address),
-    Push(Vec<Reg>),
-    Pop(Vec<Reg>),
+    Push(OneOrMoreRegisters),
+    Pop(OneOrMoreRegisters),
     BitOr(Reg, Reg, RegOrImmediate),
     BitAnd(Reg, Reg, RegOrImmediate),
     BitXor(Reg, Reg, RegOrImmediate),
@@ -37,6 +40,56 @@ pub(super) enum Inst {
     BLt(BranchTarget),
     BGt(BranchTarget),
     Ret,
+}
+
+pub(super) enum OneOrMoreRegisters {
+    One(Reg),
+    Multiple(Vec<Reg>),
+}
+
+impl<const N: usize> From<[Reg; N]> for OneOrMoreRegisters {
+    fn from(value: [Reg; N]) -> Self {
+        OneOrMoreRegisters::Multiple(value.into())
+    }
+}
+
+impl From<Reg> for OneOrMoreRegisters {
+    fn from(value: Reg) -> Self {
+        OneOrMoreRegisters::One(value)
+    }
+}
+
+impl<'a> IntoIterator for &'a OneOrMoreRegisters {
+    type Item = Reg;
+    type IntoIter = OneOrMoreRegistersIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            OneOrMoreRegisters::One(reg) => OneOrMoreRegistersIterator::One(Some(*reg)),
+            OneOrMoreRegisters::Multiple(regs) => OneOrMoreRegistersIterator::Multiple(regs.iter()),
+        }
+    }
+}
+
+pub(super) enum OneOrMoreRegistersIterator<'a> {
+    One(Option<Reg>),
+    Multiple(std::slice::Iter<'a, Reg>),
+}
+
+impl<'a> Iterator for OneOrMoreRegistersIterator<'a> {
+    type Item = Reg;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            OneOrMoreRegistersIterator::One(reg) => {
+                let out_reg = *reg;
+                *reg = None;
+
+                out_reg
+            }
+            OneOrMoreRegistersIterator::Multiple(regs) => regs.next().copied(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]

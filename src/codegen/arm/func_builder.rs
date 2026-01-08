@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use crate::{
     codegen::{
-        arm::{Address, BranchTarget, RegOrImmediate},
+        arm::{Address, BranchTarget, OneOrMoreRegisters, RegOrImmediate},
         Generator, Inst, Reg,
     },
     id_type::GetAndIncrement,
@@ -68,11 +68,11 @@ impl<'a> FuncBuilder<'a> {
         self.append(Inst::InlineAsm(asm.into()))
     }
 
-    pub fn push(&mut self, regs: &[Reg]) -> &mut Self {
+    pub fn push(&mut self, regs: impl Into<OneOrMoreRegisters>) -> &mut Self {
         self.append(Inst::Push(regs.into()))
     }
 
-    pub fn pop(&mut self, regs: &[Reg]) -> &mut Self {
+    pub fn pop(&mut self, regs: impl Into<OneOrMoreRegisters>) -> &mut Self {
         self.append(Inst::Pop(regs.into()))
     }
 
@@ -212,8 +212,8 @@ impl<'a> Display for FuncBuilder<'a> {
                 Inst::Load(dest, address) => write!(f, "\tLDR {dest}, {address}"),
                 Inst::StoreB(src, address) => write!(f, "\tSTRB {src}, {address}"),
                 Inst::LoadB(dest, address) => write!(f, "\tLDRB {dest}, {address}"),
-                Inst::Push(regs) => write!(f, "\tPUSH {{{}}}", regs.iter().join(", ")),
-                Inst::Pop(regs) => write!(f, "\tPOP {{{}}}", regs.iter().join(", ")),
+                Inst::Push(regs) => write!(f, "\tPUSH {{{}}}", regs.into_iter().join(", ")),
+                Inst::Pop(regs) => write!(f, "\tPOP {{{}}}", regs.into_iter().join(", ")),
                 Inst::BitOr(dest, left, right) => write!(f, "\tORR {dest}, {left}, {right}"),
                 Inst::BitAnd(dest, left, right) => write!(f, "\tAND {dest}, {left}, {right}"),
                 Inst::BitXor(dest, left, right) => write!(f, "\tEOR {dest}, {left}, {right}"),
