@@ -407,6 +407,7 @@ impl<'a> Parser<'a> {
             TokenKind::MinusMinus => Some(UnaryOp::DecrementThenGet),
             TokenKind::SizeOf => Some(UnaryOp::SizeOf),
             TokenKind::BooleanNot => Some(UnaryOp::BooleanNot),
+            TokenKind::Ampersand => Some(UnaryOp::AddressOf),
             _ => None,
         }) else {
             return self.parse_postfix_expr();
