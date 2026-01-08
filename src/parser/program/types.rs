@@ -49,7 +49,7 @@ pub enum CPrimitive {
 
 impl CPrimitive {
     /// Convert this type to an unsigned version, if one exists.
-    pub fn unsigned(self) -> Option<Self> {
+    pub const fn unsigned(self) -> Option<Self> {
         match self {
             Self::Char => Some(Self::UnsignedChar),
             Self::Short => Some(Self::UnsignedShort),
@@ -61,7 +61,7 @@ impl CPrimitive {
     }
 
     /// Convert this type to a signed version, if one exists.
-    pub fn signed(self) -> Option<Self> {
+    pub const fn signed(self) -> Option<Self> {
         match self {
             Self::UnsignedChar => Some(Self::SignedChar),
             Self::UnsignedShort => Some(Self::Short),
