@@ -646,10 +646,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.generate_expr(left, NOWHERE)?;
                 self.generate_expr(right, destination)?;
             }
-                Expr::StringLiteral(_) => panic!("A string is not an assignment target"),
-                Expr::IntLiteral(_) => panic!("A number is not an assignment target"),
-                Expr::Call(_) => panic!("A function call is not an assignment target"),
             BinaryOp::Assign => match left {
+                Expr::StringLiteral(_) => bail!("A string is not an assignment target"),
+                Expr::IntLiteral(_) => bail!("A number is not an assignment target"),
+                Expr::Call(_) => bail!("A function call is not an assignment target"),
 
                 Expr::Reference(name) => {
                     if let Some(local) = self.get_localvar(name) {
@@ -662,7 +662,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         return Ok(());
                     }
 
-                    panic!("Bad assignment target: undeclared variable `{name}`")
+                    bail!("Bad assignment target: undeclared variable `{name}`")
                 }
 
                 Expr::BinaryOp(binary_op, expr, expr1) => {
