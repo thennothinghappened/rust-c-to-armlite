@@ -2,7 +2,7 @@
 #ifndef STRINGLENGTH_C
 #define STRINGLENGTH_C
 
-#include "stdint.h"
+#include "stddef.h"
 
 size_t StringLength(char* buffer, size_t bufferLength)
 {

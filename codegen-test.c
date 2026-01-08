@@ -1,5 +1,5 @@
 
-#include "stdint.h"
+#include "stddef.h"
 #include "armlite.h"
 #include "StringLength.c"
 
