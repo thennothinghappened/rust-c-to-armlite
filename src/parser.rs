@@ -591,11 +591,11 @@ impl<'a> Parser<'a> {
             TokenKind::Struct => self.parse_struct(),
 
             // Typedef'd something-or-other!
-            TokenKind::Ident(_) => {
-                let ident = self.consume_ident()?;
+            TokenKind::Ident(id) => {
+                self.next();
 
                 self.program
-                    .resolve_typedef(&ident)
+                    .resolve_typedef(&self.lexer.context.get_ident(id))
                     .ok_or_else(|| self.unexpected_token())
             }
 
