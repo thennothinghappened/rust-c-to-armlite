@@ -515,9 +515,62 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 UnaryOp::SizeOf => {
                     let size = self.generator.sizeof_ctype(self.type_of_expr(expr)?);
 
-                    self.b.mov(Reg::R0, size as i32);
-                    self.b.str(Reg::R0, destination.address);
+                    match destination.ctype {
+                        CType::AsIs(cconcrete_type) => match cconcrete_type {
+                            CConcreteType::Struct(_) => {
+                                bail!("A struct is not a valid assignment target for a number")
+                            }
+                            CConcreteType::Func(_) => {
+                                bail!("A function pointer is not a valid assignment target for a number")
+                            }
+                            CConcreteType::Enum(_) => todo!(),
 
+                            CConcreteType::Primitive(primitive) => match primitive {
+                                CPrimitive::Void => (),
+
+                                CPrimitive::Bool | CPrimitive::Char | CPrimitive::UnsignedChar => {
+                                    self.b.mov(Reg::R0, size & 0xff);
+                                    self.b.strb(Reg::R0, destination.address);
+                                }
+
+                                CPrimitive::SignedChar => {
+                                    self.b.mov(Reg::R0, size & 0x7f);
+                                    self.b.strb(Reg::R0, destination.address);
+                                }
+
+                                CPrimitive::Short | CPrimitive::UnsignedShort => {
+                                    self.b.ldr(Reg::R0, destination.address);
+                                    self.b.shr(Reg::R0, Reg::R0, 16);
+                                    self.b.shl(Reg::R0, Reg::R0, 16);
+                                    self.b.or(Reg::R0, Reg::R0, size & 0xffff);
+                                    self.b.str(Reg::R0, destination.address);
+                                }
+
+                                CPrimitive::Int
+                                | CPrimitive::UnsignedInt
+                                | CPrimitive::Long
+                                | CPrimitive::UnsignedLong => {
+                                    self.b.mov(Reg::R0, size);
+                                    self.b.str(Reg::R0, destination.address);
+                                }
+
+                                CPrimitive::LongLong | CPrimitive::UnsignedLongLong => {}
+
+                                CPrimitive::Float | CPrimitive::Double | CPrimitive::LongDouble => {
+                                    self.b.mov(Reg::R0, size as f32);
+                                    self.b.str(Reg::R0, destination.address);
+                                }
+                            },
+                        },
+
+                        CType::PointerTo(_) => {
+                            todo!("A pointer is not a valid assignment target for a number")
+                        }
+
+                        CType::ArrayOf(_, _) => {
+                            bail!("An array is not a valid assignment target for a number")
+                        }
+                    }
                 }
 
                 UnaryOp::BooleanNot => {

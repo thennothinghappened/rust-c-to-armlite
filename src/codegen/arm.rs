@@ -238,7 +238,8 @@ impl Sub<i32> for LiteralIndexAddress {
 #[derive(Clone, Copy)]
 pub(super) enum RegOrImmediate {
     Reg(Reg),
-    Imm(i32),
+    ImmI32(i32),
+    ImmF32(f32),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -290,9 +291,19 @@ impl Display for Address {
 
 impl Display for RegOrImmediate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
+        match *self {
             RegOrImmediate::Reg(reg) => reg.fmt(f),
-            RegOrImmediate::Imm(value) => write!(f, "#{value}"),
+            RegOrImmediate::ImmI32(value) => write!(f, "#{value}"),
+            RegOrImmediate::ImmF32(value) => {
+                // Convert the number into the IEEE 754 32-bit float
+                // representation, but display it as a signed integer literal, since ARMLite doesn't
+                // support floats.
+                //
+                // For manipulating these floats, we need to do that in software, unfortunately.
+
+                let bitcasted_float = f32::to_bits(value) as i32;
+                write!(f, "#{bitcasted_float}")
+            }
         }
     }
 }
@@ -305,13 +316,19 @@ impl From<Reg> for RegOrImmediate {
 
 impl From<i32> for RegOrImmediate {
     fn from(value: i32) -> Self {
-        RegOrImmediate::Imm(value)
+        RegOrImmediate::ImmI32(value)
     }
 }
 
 impl From<u32> for RegOrImmediate {
     fn from(value: u32) -> Self {
-        RegOrImmediate::Imm(value as i32)
+        RegOrImmediate::ImmI32(value as i32)
+    }
+}
+
+impl From<f32> for RegOrImmediate {
+    fn from(value: f32) -> Self {
+        RegOrImmediate::ImmF32(value)
     }
 }
 
