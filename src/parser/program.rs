@@ -15,7 +15,7 @@ use crate::{
         expr::Expr,
         statement::{Block, Variable},
         types::{
-            CPrimitive, CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CStruct,
+            CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CPrimitive, CStruct,
             CStructId, CType, CTypeId, Member, TypeDef,
         },
     },
@@ -70,6 +70,11 @@ impl Program {
                 .get(self.ctypes_by_name.get(name)?)
                 .expect("typedef names->ids shouldn't de-sync with ids->types!!"),
         )
+    }
+
+    pub fn pointer_to(&self, ctype: impl Into<CType>) -> CType {
+        let ctype = ctype.into();
+        CType::PointerTo(self.ctype_id_of(ctype))
     }
 
     pub fn declare_named_struct(

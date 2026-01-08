@@ -1,11 +1,15 @@
-use std::{cell::Cell, collections::HashMap, fmt::Display};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet, VecDeque},
+    fmt::Display,
+};
 
 use bimap::BiMap;
 use itertools::Itertools;
 
 use crate::{
     codegen::{
-        arm::{Address, BranchTarget, OneOrMoreRegisters, RegOrImmediate},
+        arm::{Address, BranchTarget, LiteralIndexAddress, OneOrMoreRegisters, RegOrImmediate},
         Generator, Inst, Reg,
     },
     id_type::GetAndIncrement,
@@ -154,6 +158,31 @@ impl<'a> FuncBuilder<'a> {
 
     pub fn ret(&mut self) -> &mut Self {
         self.append(Inst::Ret)
+    }
+
+    /// Load the address `addr` into the destination register `dest`. Works like x86's `LEA`.
+    pub fn load_address(&mut self, dest: Reg, addr: impl Into<Address>) {
+        let addr = addr.into();
+
+        match addr {
+            Address::LiteralIndex(LiteralIndexAddress { base, offset: 0 }) => self.mov(dest, base),
+
+            Address::RelativeIndex(addr) => {
+                if addr.negate_offset {
+                    self.sub(dest, addr.base, addr.offset)
+                } else {
+                    self.add(dest, addr.base, addr.offset)
+                }
+            }
+
+            Address::LiteralIndex(addr) => {
+                if addr.offset < 0 {
+                    self.sub(dest, addr.base, -addr.offset)
+                } else {
+                    self.add(dest, addr.base, addr.offset)
+                }
+            }
+        };
     }
 
     pub fn build(self) -> String {

@@ -111,55 +111,137 @@ impl From<i32> for BranchTarget {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct Address {
+#[derive(Clone, Copy)]
+pub(super) enum Address {
+    RelativeIndex(RelativeIndexAddress),
+    LiteralIndex(LiteralIndexAddress),
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct RelativeIndexAddress {
     pub base: Reg,
-    pub offset: RegOrImmediate,
+    pub offset: Reg,
     pub negate_offset: bool,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct LiteralIndexAddress {
+    pub base: Reg,
+    pub offset: i32,
+}
+
 impl Address {
-    pub fn at(reg: Reg) -> Self {
-        Self {
-            base: reg,
-            offset: RegOrImmediate::Imm(0),
-            negate_offset: false,
-        }
+    pub const fn at(base: Reg) -> Self {
+        Self::offset(base, 0)
     }
 
-    pub fn relative(base: Reg, offset: impl Into<RegOrImmediate>) -> Self {
-        Self {
+    pub const fn relative(base: Reg, offset: Reg, negate_offset: bool) -> Self {
+        Self::RelativeIndex(RelativeIndexAddress {
             base,
-            offset: offset.into(),
-            negate_offset: false,
+            offset,
+            negate_offset,
+        })
+    }
+
+    pub const fn offset(base: Reg, offset: i32) -> Self {
+        Self::LiteralIndex(LiteralIndexAddress { base, offset })
+    }
+
+    pub const fn base(&self) -> Reg {
+        match self {
+            Address::RelativeIndex(relative_index_address) => relative_index_address.base,
+            Address::LiteralIndex(literal_index_address) => literal_index_address.base,
         }
     }
 }
 
 impl Add<i32> for Reg {
-    type Output = Address;
+    type Output = LiteralIndexAddress;
 
     fn add(self, rhs: i32) -> Self::Output {
-        Address::relative(self, rhs)
+        LiteralIndexAddress {
+            base: self,
+            offset: rhs,
+        }
+    }
+}
+
+impl Sub<i32> for Reg {
+    type Output = LiteralIndexAddress;
+
+    fn sub(self, rhs: i32) -> Self::Output {
+        LiteralIndexAddress {
+            base: self,
+            offset: -rhs,
+        }
     }
 }
 
 impl Add<Self> for Reg {
-    type Output = Address;
+    type Output = RelativeIndexAddress;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Address::relative(self, rhs)
+        RelativeIndexAddress {
+            base: self,
+            offset: rhs,
+            negate_offset: false,
+        }
     }
 }
 
-#[derive(Clone)]
-pub(super) enum RegOrImmediate {
-    Reg(Reg),
-    Imm(i32),
-    Label(String),
+impl Sub<Self> for Reg {
+    type Output = RelativeIndexAddress;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        RelativeIndexAddress {
+            base: self,
+            offset: rhs,
+            negate_offset: true,
+        }
+    }
+}
+
+impl From<LiteralIndexAddress> for Address {
+    fn from(value: LiteralIndexAddress) -> Self {
+        Self::LiteralIndex(value)
+    }
+}
+
+impl From<RelativeIndexAddress> for Address {
+    fn from(value: RelativeIndexAddress) -> Self {
+        Self::RelativeIndex(value)
+    }
+}
+
+impl Add<i32> for LiteralIndexAddress {
+    type Output = Self;
+
+    fn add(self, rhs: i32) -> Self::Output {
+        Self {
+            base: self.base,
+            offset: self.offset + rhs,
+        }
+    }
+}
+
+impl Sub<i32> for LiteralIndexAddress {
+    type Output = Self;
+
+    fn sub(self, rhs: i32) -> Self::Output {
+        Self {
+            base: self.base,
+            offset: self.offset - rhs,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
+pub(super) enum RegOrImmediate {
+    Reg(Reg),
+    Imm(i32),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Reg {
     R0,
     R1,
@@ -184,17 +266,25 @@ pub(super) enum Reg {
 
 impl Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if matches!(self.offset, RegOrImmediate::Imm(0)) {
-            return write!(f, "[{}]", self.base);
-        }
+        match self {
+            Address::RelativeIndex(addr) => write!(
+                f,
+                "[{base}{symbol}{offset}]",
+                base = addr.base,
+                symbol = if addr.negate_offset { '-' } else { '+' },
+                offset = addr.offset
+            ),
 
-        write!(
-            f,
-            "[{}{}{}]",
-            self.base,
-            if self.negate_offset { "-" } else { "+" },
-            self.offset
-        )
+            Address::LiteralIndex(LiteralIndexAddress { base, offset: 0 }) => write!(f, "[{base}]"),
+
+            Address::LiteralIndex(addr) => write!(
+                f,
+                "[{base}{symbol}#{offset}]",
+                base = addr.base,
+                symbol = if addr.offset < 0 { "-" } else { "+" },
+                offset = addr.offset.abs()
+            ),
+        }
     }
 }
 
@@ -203,7 +293,6 @@ impl Display for RegOrImmediate {
         match self {
             RegOrImmediate::Reg(reg) => reg.fmt(f),
             RegOrImmediate::Imm(value) => write!(f, "#{value}"),
-            RegOrImmediate::Label(name) => write!(f, "#{name}"),
         }
     }
 }
@@ -223,18 +312,6 @@ impl From<i32> for RegOrImmediate {
 impl From<u32> for RegOrImmediate {
     fn from(value: u32) -> Self {
         RegOrImmediate::Imm(value as i32)
-    }
-}
-
-impl From<String> for RegOrImmediate {
-    fn from(value: String) -> Self {
-        RegOrImmediate::Label(value)
-    }
-}
-
-impl From<StringId> for RegOrImmediate {
-    fn from(value: StringId) -> Self {
-        RegOrImmediate::Label(format!("{value}"))
     }
 }
 
