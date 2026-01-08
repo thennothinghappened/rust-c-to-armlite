@@ -366,6 +366,8 @@ impl<'a> Parser<'a> {
             match token {
                 TokenKind::Comma => Some(BinaryOp::AndThen),
                 TokenKind::Assign => Some(BinaryOp::Assign),
+                TokenKind::PlusAssign => Some(BinaryOp::PlusAssign),
+                TokenKind::MinusAssign => Some(BinaryOp::MinusAssign),
                 TokenKind::BooleanEqual => Some(BinaryOp::LogicEqual),
                 TokenKind::BooleanAnd => Some(BinaryOp::LogicAnd),
                 TokenKind::BooleanOr => Some(BinaryOp::LogicOr),

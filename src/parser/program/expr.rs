@@ -40,6 +40,8 @@ pub enum BinaryOp {
 
     /// Assign whatever LHS resolves to, to the evaluated value of RHS, and return that value.
     Assign,
+    PlusAssign,
+    MinusAssign,
 
     /// Comma operator: evaluate LHS, discard, evaluate RHS, return.
     AndThen,
@@ -68,6 +70,8 @@ impl BindingPower for BinaryOp {
             Self::LogicAnd => 11,
             Self::LogicOr => 12,
             Self::Assign => 14,
+            Self::PlusAssign => 14,
+            Self::MinusAssign => 14,
             Self::AndThen => 15,
         }
     }
@@ -117,6 +121,8 @@ impl Display for Expr {
             Expr::BinaryOp(op, lhs, rhs) => match op {
                 BinaryOp::AndThen => write!(f, "{lhs}, {rhs}"),
                 BinaryOp::Assign => write!(f, "{lhs} = {rhs}"),
+                BinaryOp::PlusAssign => write!(f, "{lhs} += {rhs}"),
+                BinaryOp::MinusAssign => write!(f, "{lhs} -= {rhs}"),
                 BinaryOp::LogicEqual => write!(f, "{lhs} == {rhs}"),
                 BinaryOp::Plus => write!(f, "{lhs} + {rhs}"),
                 BinaryOp::Minus => write!(f, "{lhs} - {rhs}"),

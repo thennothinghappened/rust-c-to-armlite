@@ -234,16 +234,24 @@ impl<'a> Lexer<'a> {
         }
 
         if self.accept_char('+') {
-            if self.accept_char('+') {
-                return TokenKind::PlusPlus;
+            if let Some(kind) = self.maybe_map_next_char(|char| match char {
+                '+' => Some(TokenKind::PlusPlus),
+                '=' => Some(TokenKind::PlusAssign),
+                _ => None,
+            }) {
+                return kind;
             }
 
             return TokenKind::Plus;
         }
 
         if self.accept_char('-') {
-            if self.accept_char('-') {
-                return TokenKind::MinusMinus;
+            if let Some(kind) = self.maybe_map_next_char(|char| match char {
+                '-' => Some(TokenKind::MinusMinus),
+                '=' => Some(TokenKind::MinusAssign),
+                _ => None,
+            }) {
+                return kind;
             }
 
             return TokenKind::Minus;

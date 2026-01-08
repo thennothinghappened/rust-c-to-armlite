@@ -726,6 +726,14 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 }
                 Expr::Cast(expr, ctype) => todo!("Cast assignment target >:("),
             },
+
+            BinaryOp::PlusAssign => {
+                // self.generate_binop(destination, BinaryOp::Plus, left, right)?;
+                // self.generate_binop(destination, BinaryOp::Assign, left, right)?;
+            }
+
+            BinaryOp::MinusAssign => {}
+
             BinaryOp::LogicEqual => {
                 let left_ctype = self.type_of_expr(left)?;
                 let left_temp = self.allocate_anon(left_ctype);
@@ -982,7 +990,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
             Expr::BinaryOp(op, left, right) => match op {
                 BinaryOp::AndThen => self.type_of_expr(right),
-                BinaryOp::Assign => self.type_of_expr(left),
+
+                BinaryOp::Assign | BinaryOp::PlusAssign | BinaryOp::MinusAssign => {
+                    self.type_of_expr(left)
+                }
 
                 BinaryOp::LogicEqual
                 | BinaryOp::LessThan
