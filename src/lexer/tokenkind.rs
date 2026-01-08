@@ -125,7 +125,7 @@ impl Display for TokenKind {
                 TokenKind::IntLiteral(int) => return write!(f, "{int}"),
                 TokenKind::Unknown(char) => return write!(f, "Unknown({char})"),
                 TokenKind::IncludeFileNotFound(id) =>
-                    return write!(f, "<<Failed include for source with identifier ID {id}>>"),
+                    return write!(f, "<<Failed include for source with identifier ID {id:?}>>"),
                 TokenKind::UnknownPreprocessorDirective(_) => return write!(f, ""),
                 TokenKind::DiscardMarker => "<<Internal Discard Marker>>",
                 TokenKind::Eof => "<<End Of File>>",
