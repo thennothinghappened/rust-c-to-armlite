@@ -1,5 +1,6 @@
 
 #include "armlite.h"
+#include "armlite-io.c"
 #include "StringLength.c"
 
 int main() {
@@ -18,6 +19,13 @@ int main() {
 	WriteString("The first letter of your name is ");
 	WriteChar(name[0]);
 	WriteString("\n");
+
+	// int args[1] = {
+	// 	name[0]
+	// };
+
+	int firstArg = name[0];
+	PrintFormatted("The first letter of your name is %d.\n", &firstArg);
 
 	size_t nameLength = StringLength(name, sizeof(name));
 	
