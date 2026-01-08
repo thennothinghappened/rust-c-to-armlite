@@ -588,7 +588,28 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 }
 
                 UnaryOp::Negative => todo!(),
-                UnaryOp::AddressOf => todo!(),
+
+                UnaryOp::AddressOf => match &**expr {
+                    Expr::StringLiteral(_) => todo!(),
+                    Expr::IntLiteral(_) => todo!(),
+
+                    Expr::Reference(name) => {
+                        if let Some(var) = self.get_localvar(name) {
+                            self.b.load_address(Reg::R0, var);
+                            self.b.str(Reg::R0, destination.address);
+
+                            return Ok(());
+                        }
+
+                        todo!()
+                    }
+
+                    Expr::Call(call) => todo!(),
+                    Expr::BinaryOp(binary_op, expr, expr1) => todo!(),
+                    Expr::UnaryOp(unary_op, expr) => todo!(),
+                    Expr::Cast(expr, ctype) => todo!(),
+                },
+
                 UnaryOp::Dereference => todo!(),
             },
 
