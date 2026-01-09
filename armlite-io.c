@@ -9,14 +9,11 @@ int PrintFormatted(char *format, int *argsArray)
 {
 	size_t argIndex = 0;
 	size_t charIndex = 0;
-
-	WriteString("==> Beginning printf\n");
 	
 	while (1)
 	{
 		char c = format[charIndex];
 		
-		WriteString("\n--> DONE!");
 		if (c == '\0')
 		{
 			break;
@@ -27,7 +24,6 @@ int PrintFormatted(char *format, int *argsArray)
 		if (!(c == '%'))
 		{
 			WriteChar(c);
-			// WriteString("\n\n---- Continuing ----\n\n");
 			continue;
 		}
 
