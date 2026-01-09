@@ -291,22 +291,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.b(breakable.done_label);
             }
 
-            Statement::Continue => {
-                let breakable = *self
-                    .breakable_stack
-                    .back()
-                    .context("continue can't be used outside a breakable")?;
-
-                self.b.comment("continue");
-
-                self.b.add(
-                    Reg::Sp,
-                    Reg::Sp,
-                    breakable.stack_top_pos - self.stack_top_pos,
-                );
-
-                self.b.b(breakable.loop_label);
-            }
+            Statement::Continue => self.generate_continue_stmt()?,
 
             Statement::If {
                 condition,
@@ -354,11 +339,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.comment(format!("while ({condition})"));
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
 
-                self.breakable_stack.push_back(Breakable {
+                let breakable = Breakable {
                     loop_label,
                     done_label,
                     stack_top_pos: self.stack_top_pos,
-                });
+                };
+
+                self.breakable_stack.push_back(breakable);
 
                 self.b.label(loop_label);
                 self.generate_expr(condition, temp_condition_storage)?;
@@ -369,7 +356,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 self.b.comment("do");
                 self.generate_stmt(block)?;
-                self.b.b(loop_label);
+
+                self.generate_continue_stmt()?;
 
                 self.b.comment(format!("endwhile ({condition})"));
                 self.b.label(done_label);
@@ -381,6 +369,24 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             Statement::Block(block) => self.generate_block(block)?,
         };
 
+        Ok(())
+    }
+
+    fn generate_continue_stmt(&mut self) -> anyhow::Result<()> {
+        let breakable = *self
+            .breakable_stack
+            .back()
+            .context("continue can't be used outside a breakable")?;
+
+        self.b.comment("continue");
+
+        self.b.add(
+            Reg::Sp,
+            Reg::Sp,
+            breakable.stack_top_pos - self.stack_top_pos,
+        );
+
+        self.b.b(breakable.loop_label);
         Ok(())
     }
 
