@@ -85,7 +85,7 @@ impl FileBuilder {
 
         output += PRELUDE;
         output += "\n";
-        output += &self.function_builders.into_inner().join("\n");
+        output += &self.function_builders.into_inner().join("\n\n\n");
         output += "\n";
 
         for (name, value) in self.constant_strings.borrow().iter() {
