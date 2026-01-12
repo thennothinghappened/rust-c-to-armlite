@@ -13,7 +13,7 @@ use phf::phf_map;
 
 use crate::{
     codegen::{
-        arm::{file_builder::FileBuilder, func_builder, Address, Inst, Reg, RegOrImmediate},
+        arm::{file_builder::FileBuilder, func_builder, Address, Reg, RegOrImmediate},
         func_builder::FuncBuilder,
         func_generator::FuncGenerator,
     },

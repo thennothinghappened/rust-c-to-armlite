@@ -9,12 +9,9 @@ use bimap::BiMap;
 use itertools::Itertools;
 
 use crate::{
-    codegen::{
-        arm::{
-            Address, BranchTarget, CommentPosition, LiteralIndexAddress, OneOrMoreRegisters,
-            RegOrImmediate,
-        },
-        Generator, Inst, Reg,
+    codegen::arm::{
+        Address, BranchTarget, CommentPosition, Inst, LiteralIndexAddress, OneOrMoreRegisters, Reg,
+        RegOrImmediate,
     },
     id_type::GetAndIncrement,
     parser::program::types::CFuncType,
@@ -46,11 +43,6 @@ impl<'a> FuncBuilder<'a> {
 
     pub fn append_doc_line(&mut self, line: impl Into<String>) {
         self.doc_comment.push(line.into());
-    }
-
-    pub fn append(&mut self, inst: Inst) -> &mut Self {
-        self.instructions.push(inst);
-        self
     }
 
     pub fn comment(&mut self, comment: impl Into<String>) {
@@ -199,6 +191,11 @@ impl<'a> FuncBuilder<'a> {
 
     pub fn build(self) -> String {
         format!("{self}")
+    }
+
+    fn append(&mut self, inst: Inst) -> &mut Self {
+        self.instructions.push(inst);
+        self
     }
 
     fn format_label(&self, id: LabelId) -> String {

@@ -13,7 +13,7 @@ use crate::{
 pub(super) mod file_builder;
 pub(super) mod func_builder;
 
-pub(super) enum Inst {
+enum Inst {
     InlineAsm(String),
     Comment(String, CommentPosition),
     Label(LabelId),
