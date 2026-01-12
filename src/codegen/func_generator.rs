@@ -98,7 +98,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         };
 
         self.b.inline_comment(format!(
-            "Allocate a {typename} ({bytes} bytes) at {location} (Expecting SP = {sp:#010x})",
+            "ALLOC {typename} ({bytes} bytes) at {location} (Expecting SP = {sp:#010x})",
             typename = self.generator.program.format_ctype(ctype),
             bytes = actual_size,
             location = Address::from(local),
@@ -301,7 +301,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let if_false_label = self.b.create_label("If__else");
                 let done_label = self.b.create_label("If__done");
 
-                self.b.header(format!("if ({condition})"));
+                self.b.header(format!("## if ({condition})"));
 
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
                 self.generate_expr(condition, temp_condition_storage)?;
@@ -317,18 +317,18 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.b.beq(done_label);
                 }
 
-                self.b.header("then");
+                self.b.header("### then");
                 self.generate_stmt(if_true)?;
 
                 if let Some(if_false) = if_false {
                     self.b.b(done_label);
 
-                    self.b.header("else");
+                    self.b.header(format!("### else"));
                     self.b.label(if_false_label);
                     self.generate_stmt(if_false)?;
                 }
 
-                self.b.footer(format!("endif ({condition})"));
+                self.b.footer(format!("## endif ({condition})"));
                 self.b.label(done_label);
             }
 
@@ -399,7 +399,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     ) -> anyhow::Result<()> {
         let destination = destination.into();
 
-        self.b.header(format!("Perform expression `{expr}`"));
+        self.b.header(format!("EVALUATE `{expr}`"));
 
         match expr {
             Expr::StringLiteral(value) => {
