@@ -219,9 +219,19 @@ impl<'a> FuncBuilder<'a> {
 
 impl<'a> Display for FuncBuilder<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "; =============================================================================="
+        )?;
+
         for line in &self.doc_comment {
             writeln!(f, "; {line}")?;
         }
+
+        writeln!(
+            f,
+            "; =============================================================================="
+        )?;
 
         writeln!(f, "{}:", self.format_fn(self.name))?;
 
@@ -249,7 +259,7 @@ impl<'a> Display for FuncBuilder<'a> {
                     }
                 },
 
-                Inst::Label(id) => write!(f, "{}:", self.format_label(*id))?,
+                Inst::Label(id) => write!(f, "\n{}:", self.format_label(*id))?,
                 Inst::Mov(dest, src) => write!(f, "\tMOV {dest}, {src}")?,
                 Inst::Add(dest, left, right) => write!(f, "\tADD {dest}, {left}, {right}")?,
                 Inst::Sub(dest, left, right) => write!(f, "\tSUB {dest}, {left}, {right}")?,
