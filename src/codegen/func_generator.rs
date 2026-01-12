@@ -669,12 +669,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
         arg_target_spots.reverse();
 
-        assert_eq!(
-            arg_target_spots.len(),
-            call_args.len(),
-            "must pass the expected arg count in calling {0:?} with signature {sig_id:?}",
-            call_target
-        );
+        if arg_target_spots.len() != call_args.len() {
+            bail!(
+                "must pass the expected arg count in calling {call_target:?} with signature {sig_id:?}"
+            );
+        }
 
         let stack_pointer_adjustment = initial_frame_top - self.stack_top_pos;
 
