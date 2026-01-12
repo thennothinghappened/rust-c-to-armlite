@@ -2,6 +2,7 @@ use std::{
     cell::Cell,
     collections::{HashMap, HashSet, VecDeque},
     fmt::Display,
+    ops::Not,
 };
 
 use bimap::BiMap;
@@ -9,7 +10,10 @@ use itertools::Itertools;
 
 use crate::{
     codegen::{
-        arm::{Address, BranchTarget, LiteralIndexAddress, OneOrMoreRegisters, RegOrImmediate},
+        arm::{
+            Address, BranchTarget, CommentPosition, LiteralIndexAddress, OneOrMoreRegisters,
+            RegOrImmediate,
+        },
         Generator, Inst, Reg,
     },
     id_type::GetAndIncrement,
@@ -49,12 +53,20 @@ impl<'a> FuncBuilder<'a> {
         self
     }
 
-    pub fn comment(&mut self, comment: impl Into<String>) -> &mut Self {
-        self.append(Inst::Comment(comment.into()))
+    pub fn comment(&mut self, comment: impl Into<String>) {
+        self.append(Inst::Comment(comment.into(), CommentPosition::Line));
     }
 
-    pub fn inline_comment(&mut self, comment: impl Into<String>) -> &mut Self {
-        self.append(Inst::InlineComment(comment.into()))
+    pub fn header(&mut self, comment: impl Into<String>) {
+        self.append(Inst::Comment(comment.into(), CommentPosition::Header));
+    }
+
+    pub fn footer(&mut self, comment: impl Into<String>) {
+        self.append(Inst::Comment(comment.into(), CommentPosition::Footer));
+    }
+
+    pub fn inline_comment(&mut self, comment: impl Into<String>) {
+        self.append(Inst::Comment(comment.into(), CommentPosition::Inline));
     }
 
     pub fn create_label(&mut self, name: impl Into<String>) -> LabelId {
@@ -216,60 +228,62 @@ impl<'a> Display for FuncBuilder<'a> {
 
         writeln!(f, "{}:", self.format_fn(self.name))?;
 
-        let mut prev_was_comment = false;
-        let mut inline_comments: Vec<&str> = vec![];
+        let mut inline_comments = VecDeque::<&str>::new();
 
         for inst in &self.instructions {
             match inst {
-                Inst::InlineAsm(asm) => write!(f, "\t{asm}"),
-                Inst::Comment(text) => {
-                    if !prev_was_comment {
-                        writeln!(f)?;
+                Inst::InlineAsm(asm) => write!(f, "\t{asm}")?,
+
+                Inst::Comment(text, position) => match position {
+                    CommentPosition::Header => {
+                        writeln!(f, "\n\t; {}", text.trim().lines().join("\n\t; "))?
                     }
 
-                    write!(f, "\t; {}", text.trim().lines().join("\n\t; "))
-                }
-                Inst::InlineComment(text) => {
-                    inline_comments.push(text);
-                    Ok(())
-                }
-                Inst::Label(id) => write!(f, "{}:", self.format_label(*id)),
-                Inst::Mov(dest, src) => write!(f, "\tMOV {dest}, {src}"),
-                Inst::Add(dest, left, right) => write!(f, "\tADD {dest}, {left}, {right}"),
-                Inst::Sub(dest, left, right) => write!(f, "\tSUB {dest}, {left}, {right}"),
-                Inst::Store(src, address) => write!(f, "\tSTR {src}, {address}"),
-                Inst::Load(dest, address) => write!(f, "\tLDR {dest}, {address}"),
-                Inst::StoreB(src, address) => write!(f, "\tSTRB {src}, {address}"),
-                Inst::LoadB(dest, address) => write!(f, "\tLDRB {dest}, {address}"),
-                Inst::Push(regs) => write!(f, "\tPUSH {{{}}}", regs.into_iter().join(", ")),
-                Inst::Pop(regs) => write!(f, "\tPOP {{{}}}", regs.into_iter().join(", ")),
-                Inst::BitOr(dest, left, right) => write!(f, "\tORR {dest}, {left}, {right}"),
-                Inst::BitAnd(dest, left, right) => write!(f, "\tAND {dest}, {left}, {right}"),
-                Inst::BitXor(dest, left, right) => write!(f, "\tEOR {dest}, {left}, {right}"),
-                Inst::Call(name) => write!(f, "\tBL {}", self.format_fn(name)),
-                Inst::B(target) => write!(f, "\tB {}", self.format_branch_target(target)),
-                Inst::BNe(target) => write!(f, "\tBNE {}", self.format_branch_target(target)),
-                Inst::BEq(target) => write!(f, "\tBEQ {}", self.format_branch_target(target)),
-                Inst::BLt(target) => write!(f, "\tBLT {}", self.format_branch_target(target)),
-                Inst::BGt(target) => write!(f, "\tBGT {}", self.format_branch_target(target)),
-                Inst::Ret => write!(f, "\tRET"),
-                Inst::Cmp(reg, reg_or_immediate) => write!(f, "\tCMP {reg}, {reg_or_immediate}"),
-                Inst::BitShl(dest, left, right) => write!(f, "\tLSL {dest}, {left}, {right}"),
-                Inst::BitShr(dest, left, right) => write!(f, "\tLSR {dest}, {left}, {right}"),
-            }?;
-
-            prev_was_comment = matches!(inst, Inst::Comment(_));
-
-            match inst {
-                Inst::Comment(_) | Inst::InlineComment(_) => {}
-                _ => {
-                    if let Some(text) = inline_comments.pop() {
-                        write!(f, "\t\t; {text}")?;
+                    CommentPosition::Footer => {
+                        writeln!(f, "\t; {}\n", text.trim().lines().join("\n\t; "))?
                     }
+
+                    CommentPosition::Line => {
+                        writeln!(f, "\n\t; {}\n", text.trim().lines().join("\n\t; "))?
+                    }
+
+                    CommentPosition::Inline => {
+                        inline_comments.push_back(text);
+                    }
+                },
+
+                Inst::Label(id) => write!(f, "{}:", self.format_label(*id))?,
+                Inst::Mov(dest, src) => write!(f, "\tMOV {dest}, {src}")?,
+                Inst::Add(dest, left, right) => write!(f, "\tADD {dest}, {left}, {right}")?,
+                Inst::Sub(dest, left, right) => write!(f, "\tSUB {dest}, {left}, {right}")?,
+                Inst::Store(src, address) => write!(f, "\tSTR {src}, {address}")?,
+                Inst::Load(dest, address) => write!(f, "\tLDR {dest}, {address}")?,
+                Inst::StoreB(src, address) => write!(f, "\tSTRB {src}, {address}")?,
+                Inst::LoadB(dest, address) => write!(f, "\tLDRB {dest}, {address}")?,
+                Inst::Push(regs) => write!(f, "\tPUSH {{{}}}", regs.into_iter().join(", "))?,
+                Inst::Pop(regs) => write!(f, "\tPOP {{{}}}", regs.into_iter().join(", "))?,
+                Inst::BitOr(dest, left, right) => write!(f, "\tORR {dest}, {left}, {right}")?,
+                Inst::BitAnd(dest, left, right) => write!(f, "\tAND {dest}, {left}, {right}")?,
+                Inst::BitXor(dest, left, right) => write!(f, "\tEOR {dest}, {left}, {right}")?,
+                Inst::Call(name) => write!(f, "\tBL {}", self.format_fn(name))?,
+                Inst::B(target) => write!(f, "\tB {}", self.format_branch_target(target))?,
+                Inst::BNe(target) => write!(f, "\tBNE {}", self.format_branch_target(target))?,
+                Inst::BEq(target) => write!(f, "\tBEQ {}", self.format_branch_target(target))?,
+                Inst::BLt(target) => write!(f, "\tBLT {}", self.format_branch_target(target))?,
+                Inst::BGt(target) => write!(f, "\tBGT {}", self.format_branch_target(target))?,
+                Inst::Ret => write!(f, "\tRET")?,
+                Inst::Cmp(reg, reg_or_immediate) => write!(f, "\tCMP {reg}, {reg_or_immediate}")?,
+                Inst::BitShl(dest, left, right) => write!(f, "\tLSL {dest}, {left}, {right}")?,
+                Inst::BitShr(dest, left, right) => write!(f, "\tLSR {dest}, {left}, {right}")?,
+            };
+
+            if matches!(inst, Inst::Comment(_, _)).not() {
+                if let Some(text) = inline_comments.pop_front() {
+                    write!(f, "\t\t; {text}")?;
                 }
+
+                writeln!(f)?;
             }
-
-            writeln!(f)?;
         }
 
         Ok(())

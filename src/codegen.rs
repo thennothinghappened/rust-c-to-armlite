@@ -62,12 +62,10 @@ static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
         let loop_label = b.create_label("loop");
         let done_label = b.create_label("done");
 
-        b.comment("R0: Destination address");
-        b.comment("R1: Source address");
-        b.comment("R2: Byte count");
+        b.header("R0: Destination address\nR1: Source address\nR2: Byte count");
         b.pop([Reg::R0, Reg::R1, Reg::R2]);
 
-        b.comment("Check if caller asked us to copy 0 bytes for some reason.");
+        b.header("Check if caller asked us to copy 0 bytes for some reason.");
         b.cmp(Reg::R2, 0);
         b.beq(done_label);
 

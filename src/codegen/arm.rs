@@ -15,8 +15,7 @@ pub(super) mod func_builder;
 
 pub(super) enum Inst {
     InlineAsm(String),
-    Comment(String),
-    InlineComment(String),
+    Comment(String, CommentPosition),
     Label(LabelId),
     Mov(Reg, RegOrImmediate),
     Add(Reg, Reg, RegOrImmediate),
@@ -40,6 +39,13 @@ pub(super) enum Inst {
     BLt(BranchTarget),
     BGt(BranchTarget),
     Ret,
+}
+
+enum CommentPosition {
+    Header,
+    Footer,
+    Line,
+    Inline,
 }
 
 pub(super) enum OneOrMoreRegisters {

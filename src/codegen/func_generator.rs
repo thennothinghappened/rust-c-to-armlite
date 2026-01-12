@@ -51,7 +51,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
     /// Allocate space for a local variable, return its stack frame offset.
     fn allocate_var(&mut self, name: String, ctype: CType) -> StackLocal {
-        self.b.comment(format!(
+        self.b.header(format!(
             "{} {name};",
             self.generator.program.format_ctype(ctype)
         ));
@@ -248,7 +248,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             Statement::Return(expr) => {
                 let temp_storage = self.allocate_anon(self.b.sig.returns);
 
-                self.b.comment("<return>");
+                self.b.header("<return>");
 
                 self.generate_expr(expr, temp_storage)?;
 
@@ -271,7 +271,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.inline_comment("Perform the cleanup.");
                 self.b.b(self.done_label);
 
-                self.b.comment("</return>");
+                self.b.footer("</return>");
             }
 
             Statement::Break => {
@@ -280,7 +280,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     .back()
                     .context("break can't be used outside a breakable")?;
 
-                self.b.comment("break");
+                self.b.header("break");
 
                 self.b.add(
                     Reg::Sp,
@@ -301,7 +301,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let if_false_label = self.b.create_label("If__else");
                 let done_label = self.b.create_label("If__done");
 
-                self.b.comment(format!("if ({condition})"));
+                self.b.header(format!("if ({condition})"));
 
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
                 self.generate_expr(condition, temp_condition_storage)?;
@@ -317,18 +317,18 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.b.beq(done_label);
                 }
 
-                self.b.comment("then");
+                self.b.header("then");
                 self.generate_stmt(if_true)?;
 
                 if let Some(if_false) = if_false {
                     self.b.b(done_label);
 
-                    self.b.comment("else");
+                    self.b.header("else");
                     self.b.label(if_false_label);
                     self.generate_stmt(if_false)?;
                 }
 
-                self.b.comment(format!("endif ({condition})"));
+                self.b.footer(format!("endif ({condition})"));
                 self.b.label(done_label);
             }
 
@@ -336,7 +336,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let loop_label = self.b.create_label("While__loop");
                 let done_label = self.b.create_label("While__done");
 
-                self.b.comment(format!("while ({condition})"));
+                self.b.header(format!("while ({condition})"));
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
 
                 let breakable = Breakable {
@@ -354,12 +354,12 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.cmp(Reg::R0, 0);
                 self.b.beq(done_label);
 
-                self.b.comment("do");
+                self.b.header("do");
                 self.generate_stmt(block)?;
 
                 self.generate_continue_stmt()?;
 
-                self.b.comment(format!("endwhile ({condition})"));
+                self.b.footer(format!("endwhile ({condition})"));
                 self.b.label(done_label);
                 self.free_local(temp_condition_storage);
 
@@ -378,7 +378,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             .back()
             .context("continue can't be used outside a breakable")?;
 
-        self.b.comment("continue");
+        self.b.header("continue");
 
         self.b.add(
             Reg::Sp,
@@ -399,7 +399,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     ) -> anyhow::Result<()> {
         let destination = destination.into();
 
-        self.b.comment(format!("Perform expression `{expr}`"));
+        self.b.header(format!("Perform expression `{expr}`"));
 
         match expr {
             Expr::StringLiteral(value) => {
@@ -417,7 +417,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
             Expr::Reference(name) => {
                 if let Some(source) = self.get_localvar(name) {
-                    self.b.comment(format!(
+                    self.b.header(format!(
                         "=== query localvar `{name}` ({}) as a {} ===",
                         self.generator.program.format_ctype(source.ctype),
                         self.generator.program.format_ctype(destination.ctype)
@@ -462,7 +462,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         },
                     }
 
-                    self.b.comment(format!("=== done query `{name}` ==="));
+                    self.b.footer(format!("=== done query `{name}` ==="));
                     return Ok(());
                 }
 
@@ -678,7 +678,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
         let stack_pointer_adjustment = initial_frame_top - self.stack_top_pos;
 
-        self.b.comment(format!(
+        self.b.header(format!(
             "=== Call {1}({}) [{stack_pointer_adjustment} arg bytes] ===",
             call_args.iter().join(", "),
             call_target
@@ -716,13 +716,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
         if destination.is_nowhere() {
             self.b
-                .comment(format!("=== END Call {0} => void ===", call_target));
+                .footer(format!("=== END Call {0} => void ===", call_target));
             return Ok(());
         };
 
         if self.generator.sizeof_ctype(sig.returns) <= WORD_SIZE {
             self.b.str(Reg::R0, destination.address);
-            self.b.comment(format!(
+            self.b.footer(format!(
                 "=== END Call {1} => R0 => {} ===",
                 destination.address, call_target
             ));
@@ -812,7 +812,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(());
                 };
 
-                self.b.comment(format!("=== binop({left} + {right}) ==="));
+                self.b.header(format!("=== binop({left} + {right}) ==="));
 
                 let left_temp = self.allocate_anon(destination.ctype);
                 let right_temp = self.allocate_anon(destination.ctype);
@@ -829,7 +829,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.str(Reg::R0, destination.address);
 
                 self.b
-                    .comment(format!("=== END binop({left} + {right}) ==="));
+                    .footer(format!("=== END binop({left} + {right}) ==="));
             }
             BinaryOp::ArrayIndex => {
                 if destination.is_nowhere() {
@@ -904,7 +904,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     _ => todo!("{element_ctype:?} ({element_size} bytes) can't fit in a register"),
                 }
 
-                self.b.comment("freeing index & ptr");
+                self.b.header("freeing index & ptr");
                 self.free_local(temp_index_storage);
                 self.free_local(temp_ptr_storage);
             }
@@ -955,19 +955,19 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     "LogicOr__done"
                 });
 
-                self.b.comment("Evaluate LHS");
+                self.b.header("Evaluate LHS");
                 self.generate_expr(left, condition_storage)?;
 
-                self.b.comment("Test if LHS is truthy");
+                self.b.header("Test if LHS is truthy");
                 self.b.ldr(Reg::R0, condition_storage);
                 self.b.cmp(Reg::R0, 0);
 
                 if is_and {
                     self.b.beq(done_label);
-                    self.b.comment("LHS is truthy, evaluate RHS");
+                    self.b.header("LHS is truthy, evaluate RHS");
                 } else {
                     self.b.bne(done_label);
-                    self.b.comment("LHS is falsey, evaluate RHS");
+                    self.b.header("LHS is falsey, evaluate RHS");
                 }
 
                 self.generate_expr(right, condition_storage)?;
