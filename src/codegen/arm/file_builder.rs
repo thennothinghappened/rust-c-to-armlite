@@ -86,6 +86,7 @@ impl FileBuilder {
         output += PRELUDE;
         output += "\n";
         output += &self.function_builders.into_inner().join("\n");
+        output += "\n";
 
         for (name, value) in self.constant_strings.borrow().iter() {
             output += &format!("{name}: .ASCIZ \"{value}\"\n",);
