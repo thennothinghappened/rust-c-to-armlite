@@ -108,6 +108,8 @@ impl Generator {
     }
 
     pub fn generate(self) -> String {
+        let mut failures = Vec::<(&str, anyhow::Error)>::new();
+
         for (name, cfunc) in self.program.get_defined_functions() {
             let sig = self.program.get_cfunc_sig(cfunc.sig_id);
 
@@ -118,8 +120,8 @@ impl Generator {
                     for arg in &b.sig.args {
                         match &arg.name {
                             Some(name) => b.append_doc_line(format!(
-                                "- {name} ({})",
-                                self.program.format_ctype(arg.ctype)
+                                "- {type} {name}",
+                                type = self.program.format_ctype(arg.ctype)
                             )),
                             None => b.append_doc_line(format!(
                                 "- Unnamed argument ({})",
@@ -134,11 +136,35 @@ impl Generator {
                     return func(b);
                 }
 
-                FuncGenerator::new(&self, b).generate_func(cfunc);
+                if let Err(error) = FuncGenerator::new(&self, b).generate_func(cfunc) {
+                    b.asm(format!("\nERROR!:\n{error:?}"));
+                    failures.push((name, error));
+                }
             });
         }
 
-        self.file_builder.build()
+        let output = self.file_builder.build();
+
+        if !failures.is_empty() {
+            println!(
+                "\n================================================================================"
+            );
+
+            println!(
+                "{count} function bodies failed to generate. Their errors are listed below.\n",
+                count = failures.len()
+            );
+
+            for (name, error) in failures {
+                println!("==> Failed to generate {name}:\n{error:?}\n");
+            }
+
+            println!(
+                "================================================================================\n"
+            );
+        }
+
+        output
     }
 
     fn sizeof_ctype(&self, ctype: impl Into<CTypeOrId>) -> u32 {
