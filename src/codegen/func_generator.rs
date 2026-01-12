@@ -280,7 +280,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     .back()
                     .context("break can't be used outside a breakable")?;
 
-                self.b.header("break");
+                self.b.header("<break>");
 
                 self.b.add(
                     Reg::Sp,
@@ -289,6 +289,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 );
 
                 self.b.b(breakable.done_label);
+
+                self.b.footer("</break>");
             }
 
             Statement::Continue => self.generate_continue_stmt()?,
@@ -378,7 +380,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             .back()
             .context("continue can't be used outside a breakable")?;
 
-        self.b.header("continue");
+        self.b.header("<continue>");
 
         self.b.add(
             Reg::Sp,
@@ -387,6 +389,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         );
 
         self.b.b(breakable.loop_label);
+
+        self.b.footer("</continue>");
+
         Ok(())
     }
 

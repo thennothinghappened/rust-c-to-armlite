@@ -251,7 +251,7 @@ impl<'a> Display for FuncBuilder<'a> {
                     }
 
                     CommentPosition::Line => {
-                        writeln!(f, "\n\t; {}\n", text.trim().lines().join("\n\t; "))?
+                        writeln!(f, "\t; {}", text.trim().lines().join("\n\t; "))?
                     }
 
                     CommentPosition::Inline => {
