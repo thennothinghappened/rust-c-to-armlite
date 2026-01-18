@@ -1,6 +1,5 @@
 
-#ifndef STRINGLENGTH_C
-#define STRINGLENGTH_C
+#pragma once
 
 #include "stddef.h"
 
@@ -20,5 +19,3 @@ size_t StringLength(char* buffer, size_t bufferLength)
 
 	return index;
 }
-
-#endif

@@ -1,6 +1,5 @@
 
-#ifndef ARMLITE_IO_C
-#define ARMLITE_IO_C
+#pragma once
 
 #include "stddef.h"
 #include "armlite.h"
@@ -52,5 +51,3 @@ int PrintFormatted(char *format, int *argsArray)
 
 	return charIndex;
 }
-
-#endif
