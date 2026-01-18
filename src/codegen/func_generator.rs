@@ -450,9 +450,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         CType::ArrayOf(ctype_id, _) => match destination.ctype {
                             CType::AsIs(cconcrete_type) => {
                                 panic!(
-                                    "can't cast an array of {:?} to a value type ({:?})",
-                                    self.generator.program.get_ctype(ctype_id),
-                                    cconcrete_type
+                                    "can't cast an array ({array}) to a value type ({value})",
+                                    array = self.generator.program.format_ctype(source.ctype),
+                                    value = self.generator.program.format_ctype(cconcrete_type)
                                 )
                             }
 
