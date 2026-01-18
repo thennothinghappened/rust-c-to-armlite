@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::anyhow;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use thiserror::Error;
 
@@ -33,7 +34,7 @@ pub enum Symbol {
 
 #[derive(Default, Clone)]
 pub struct Program {
-    global_symbols: HashMap<String, Symbol>,
+    global_symbols: IndexMap<String, Symbol>,
 
     structs_by_name: HashMap<String, CStructId>,
     structs: HashMap<CStructId, CStruct>,
