@@ -32,6 +32,7 @@ pub(crate) struct Context<'a> {
 struct SourceData {
     text: Box<str>,
     sourcemap_start_index: usize,
+    pragma_once_enabled: bool,
 }
 
 impl<'a> Context<'a> {
@@ -47,6 +48,7 @@ impl<'a> Context<'a> {
             SourceData {
                 text: text.into_boxed_str(),
                 sourcemap_start_index,
+                pragma_once_enabled: false,
             },
         );
 
@@ -96,6 +98,15 @@ impl<'a> Context<'a> {
 
     pub(crate) fn get_source_start_index(&self, id: SourceId) -> usize {
         self.sources.borrow()[&id].sourcemap_start_index
+    }
+
+    pub(crate) fn allow_reading(&self, id: SourceId) -> bool {
+        !self.sources.borrow()[&id].pragma_once_enabled
+    }
+
+    pub(crate) fn source_enable_pragma_once(&self, id: SourceId) {
+        let mut sources = self.sources.borrow_mut();
+        sources.get_mut(&id).unwrap().pragma_once_enabled = true;
     }
 
     pub(crate) fn get_source_id_from_index(&self, index: usize) -> SourceId {

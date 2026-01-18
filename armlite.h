@@ -1,6 +1,5 @@
 
-#ifndef ARMLITE_H
-#define ARMLITE_H
+#pragma once
 
 #include "stddef.h"
 
@@ -12,5 +11,3 @@ void ReadString(char* outputString);
 void Panic(char* message);
 void Exit(int code);
 void memcpy(void *destination, void *source, size_t count);
-
-#endif

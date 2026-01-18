@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::Display,
     fs,
+    ops::Not,
     rc::Rc,
     str::Chars,
 };
@@ -34,6 +35,7 @@ impl Token {
 
 #[derive(Clone)]
 pub struct Lexer<'a> {
+    source_id: SourceId,
     pub index: usize,
     chars: Chars<'a>,
     token_buffer_stream: VecDeque<Token>,
@@ -44,6 +46,7 @@ pub struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     pub fn new(context: Rc<Context<'a>>, source_id: SourceId) -> Self {
         Self {
+            source_id,
             chars: context.get_source(source_id).chars(),
             index: context.get_source_start_index(source_id),
             token_buffer_stream: Default::default(),
@@ -153,7 +156,13 @@ impl<'a> Lexer<'a> {
             match directive {
                 "pragma" => {
                     self.skip_whitespace();
-                    todo!("pragma directive")
+
+                    let content = self.take_chars_until(is_newline).trim();
+
+                    match content {
+                        "once" => self.context.source_enable_pragma_once(self.source_id),
+                        _ => println!("Unrecognised #pragma `{content}`"),
+                    }
                 }
 
                 "include" => {
@@ -184,16 +193,18 @@ impl<'a> Lexer<'a> {
                         }
                     };
 
-                    let mut temp_lexer = Lexer::new(self.context.clone(), source_id);
+                    if self.context.allow_reading(source_id) {
+                        let mut temp_lexer = Lexer::new(self.context.clone(), source_id);
 
-                    loop {
-                        let token = temp_lexer.next();
+                        loop {
+                            let token = temp_lexer.next();
 
-                        if token.kind == TokenKind::Eof {
-                            break;
+                            if token.kind == TokenKind::Eof {
+                                break;
+                            }
+
+                            self.token_buffer_stream.push_back(token);
                         }
-
-                        self.token_buffer_stream.push_back(token);
                     }
                 }
 
