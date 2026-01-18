@@ -220,6 +220,15 @@ impl<'a> Lexer<'a> {
                     self.context.preproc_define(definition_name, "");
                 }
 
+                "error" => {
+                    self.skip_whitespace();
+                    let message = self.take_chars_until(is_newline);
+
+                    return TokenKind::ErrorPreprocessorDirective(
+                        self.context.allocate_ident(message),
+                    );
+                }
+
                 directive => {
                     // Eat the rest of the line so we can continue.
                     self.take_chars_until(is_newline);

@@ -58,6 +58,7 @@ pub(crate) enum TokenKind {
     Ident(IdentId),
     Unknown(char),
     UnknownPreprocessorDirective(IdentId),
+    ErrorPreprocessorDirective(IdentId),
     IncludeFileNotFound(IdentId),
     Eof,
 
@@ -130,7 +131,10 @@ impl Display for TokenKind {
                 TokenKind::Unknown(char) => return write!(f, "Unknown({char})"),
                 TokenKind::IncludeFileNotFound(id) =>
                     return write!(f, "<<Failed include for source with identifier ID {id:?}>>"),
-                TokenKind::UnknownPreprocessorDirective(_) => return write!(f, ""),
+                TokenKind::UnknownPreprocessorDirective(_) =>
+                    return write!(f, "<<Unknown Preprocessor Directive>>"),
+                TokenKind::ErrorPreprocessorDirective(_) =>
+                    return write!(f, "<<Preprocessor-thrown error>>"),
                 TokenKind::DiscardMarker => "<<Internal Discard Marker>>",
                 TokenKind::Eof => "<<End Of File>>",
             }
