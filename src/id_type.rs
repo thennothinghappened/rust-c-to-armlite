@@ -24,6 +24,10 @@ macro_rules! id_type {
 
                 current
             }
+
+            pub fn value(self) -> u32 {
+                self.0
+            }
         }
 
         impl Default for $name {

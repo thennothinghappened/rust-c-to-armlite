@@ -6,49 +6,14 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::id_type::{self, GetAndIncrement};
+use crate::{
+    codegen::AsmMode,
+    id_type::{self, GetAndIncrement},
+};
 
 use crate::{codegen::func_builder::FuncBuilder, parser::program::types::CFuncType};
 
-const PRELUDE: &str = r#"
-; ==================================================================================================
-; C RUNTIME PRELUDE
-; ==================================================================================================
-
-c_entry:
-	BL fn_main
-c_entry_post_run:
-	MOV R4, R0						; Grab the return code.
-
-	MOV R0, #const_c_entry_exitcode_msg_start
-	PUSH {R0}
-	BL fn_WriteString
-
-	PUSH {R4}
-	BL fn_WriteSignedNum
-
-	MOV R0, #const_c_entry_exitcode_msg_end
-	PUSH {R0}
-	BL fn_WriteString
-c_halt:
-	HLT
-	B c_halt
-
-const_c_entry_exitcode_msg_start:	.ASCIZ "\nProgram exited with code "
-const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
-
-; ==================================================================================================
-; END OF PRELUDE
-; ==================================================================================================
-"#;
-
 id_type!(StringId);
-
-impl Display for StringId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "str_{}", self.0)
-    }
-}
 
 #[derive(Default)]
 pub(crate) struct FileBuilder {
@@ -56,14 +21,22 @@ pub(crate) struct FileBuilder {
     constant_strings: RefCell<HashMap<StringId, String>>,
     global_vars: RefCell<HashMap<String, u32>>,
     next_string_id: Cell<StringId>,
+    asm_mode: AsmMode,
 }
 
 impl FileBuilder {
+    pub fn new(asm_mode: AsmMode) -> Self {
+        Self {
+            asm_mode,
+            ..Default::default()
+        }
+    }
+
     pub fn create_function<F>(&self, name: &str, sig: &CFuncType, block: F)
     where
         F: FnOnce(&mut FuncBuilder<'_>),
     {
-        let mut builder = FuncBuilder::new(name, sig);
+        let mut builder = FuncBuilder::new(name, sig, self.asm_mode);
         block(&mut builder);
 
         self.function_builders.borrow_mut().push(builder.build());
@@ -83,13 +56,17 @@ impl FileBuilder {
     pub fn build(self) -> String {
         let mut output = String::new();
 
-        output += PRELUDE;
+        match self.asm_mode {
+            AsmMode::ArmLite => (),
+            AsmMode::ArmV7 => output += ".TEXT\n",
+        }
+
         output += "\n";
         output += &self.function_builders.into_inner().join("\n\n\n");
         output += "\n";
 
-        for (name, value) in self.constant_strings.borrow().iter() {
-            output += &format!("{name}: .ASCIZ \"{value}\"\n",);
+        for (string_id, value) in self.constant_strings.borrow().iter() {
+            output += &format!("str_{}: .ASCIZ \"{value}\"\n", string_id.0);
         }
 
         output += "\n.DATA\n";

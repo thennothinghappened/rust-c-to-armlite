@@ -1,4 +1,5 @@
 use std::{
+    collections::VecDeque,
     env::args,
     fs::{self, read, read_to_string},
     io::stdin,
@@ -11,7 +12,7 @@ use codespan_reporting::{
     term,
 };
 
-use crate::{context::Context, lexer::Lexer, parser::Parser};
+use crate::{codegen::arm::AsmMode, context::Context, lexer::Lexer, parser::Parser};
 
 #[macro_use]
 mod id_type;
@@ -23,20 +24,38 @@ mod parser;
 mod span;
 
 fn main() {
+    let mut asm_mode = AsmMode::default();
+
+    let codespan_config = codespan_reporting::term::Config::default();
     let codespan_writer =
         term::termcolor::StandardStream::stderr(term::termcolor::ColorChoice::Always);
 
-    let codespan_config = codespan_reporting::term::Config::default();
+    let (options, mut args): (VecDeque<String>, VecDeque<String>) =
+        args().skip(1).partition(|arg| arg.starts_with("--"));
 
-    if let Some(path) = args().nth(1) {
+    for option in options {
+        match &option[2..] {
+            "armv7" => {
+                asm_mode = AsmMode::ArmV7;
+            }
+            _ => panic!("Unknown option {option}"),
+        }
+    }
+
+    if let Some(path) = args.pop_front() {
         let buf = read_to_string(&path).expect("Must pass a valid path to read from");
 
-        let Some(output) = parse_program(buf, Some(path), &codespan_writer, &codespan_config)
-        else {
+        let Some(output) = parse_program(
+            buf,
+            asm_mode,
+            Some(path),
+            &codespan_writer,
+            &codespan_config,
+        ) else {
             return;
         };
 
-        if let Some(out_path) = args().nth(2) {
+        if let Some(out_path) = args.pop_front() {
             fs::write(out_path, output).expect("Failed to write output asm file");
         } else {
             println!("--- Code generated ---\n{output}");
@@ -58,7 +77,8 @@ fn main() {
             }
         }
 
-        if let Some(output) = parse_program(buf, None, &codespan_writer, &codespan_config) {
+        if let Some(output) = parse_program(buf, asm_mode, None, &codespan_writer, &codespan_config)
+        {
             println!("--- Code generated ---\n{output}");
         }
     }
@@ -66,11 +86,12 @@ fn main() {
 
 fn parse_program(
     text: String,
+    asm_mode: AsmMode,
     file_name: Option<String>,
     codespan_writer: &term::termcolor::StandardStream,
     codespan_config: &term::Config,
 ) -> Option<String> {
-    let context = Rc::new(Context::default());
+    let context = Rc::new(Context::new(asm_mode));
 
     let source_id = match file_name {
         Some(path) => context.add_source_file_path(path).ok()?,
@@ -110,5 +131,5 @@ fn parse_program(
 
     println!("Program: {program}");
 
-    Some(codegen::Generator::new(program).generate())
+    Some(codegen::Generator::new(program, asm_mode).generate())
 }

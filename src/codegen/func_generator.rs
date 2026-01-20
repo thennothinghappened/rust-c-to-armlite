@@ -1,4 +1,7 @@
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    ops::{Shl, Shr},
+};
 
 use anyhow::{bail, Context};
 use itertools::Itertools;
@@ -67,11 +70,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         let ctype = ctype.into();
 
         let size = self.generator.sizeof_ctype(ctype);
-        let mut actual_size = (size >> 2) << 2;
-
-        if actual_size < 4 {
-            actual_size = 4;
-        }
+        let actual_size = Self::align(size);
 
         // look for a free spot first before allocing.
         let mut offset = 0;
@@ -101,13 +100,29 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             "ALLOC {typename} ({bytes} bytes) at {location} (Expecting SP = {sp:#010x})",
             typename = self.generator.program.format_ctype(ctype),
             bytes = actual_size,
-            location = Address::from(local),
+            location = self.b.format_address(&Address::from(local)),
             sp = 0x00100000 + self.stack_top_pos - 0x8
         ));
 
         self.b.sub(Reg::Sp, Reg::Sp, actual_size as i32);
 
         local
+    }
+
+    fn align<Scalar>(offset: Scalar) -> Scalar
+    where
+        Scalar: Shl<Output = Scalar>,
+        Scalar: Shr<Output = Scalar>,
+        Scalar: Ord,
+        Scalar: From<u8>,
+    {
+        let mut actual_offset: Scalar = (offset >> 2.into()) << 2.into();
+
+        if actual_offset < 4.into() {
+            actual_offset = 4.into();
+        }
+
+        actual_offset
     }
 
     /// Free a local variable on the stack. Its spot can now be recycled.
@@ -179,7 +194,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         }
 
         for arg in self.b.sig.args.iter() {
-            offset += self.generator.sizeof_ctype(arg.ctype) as i32;
+            offset += Self::align(self.generator.sizeof_ctype(arg.ctype)) as i32;
 
             if arg.name.as_deref() == Some(name) {
                 return Some(StackLocal {
@@ -231,12 +246,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     .sig
                     .args
                     .iter()
-                    .map(|arg| self.generator.sizeof_ctype(arg.ctype))
+                    .map(|arg| Self::align(self.generator.sizeof_ctype(arg.ctype)))
                     .sum::<u32>() as i32,
             );
         }
 
         self.b.ret();
+
         Ok(())
     }
 
@@ -428,7 +444,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             Expr::StringLiteral(value) => {
                 let string_id = self.generator.file_builder.create_string(value);
 
-                self.b.asm(format!("MOV R0, #{string_id}"));
+                self.b.mov(Reg::R0, string_id);
                 self.b.str(Reg::R0, destination.address);
             }
 
@@ -625,12 +641,20 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.generate_expr(expr, destination)?;
 
                     if destination.is_somewhere() {
+                        let upon_truthy_input = self.b.create_label("BooleanNot__uponTruthyInput");
+                        let done = self.b.create_label("BooleanNot__done");
+
                         self.b.ldr(Reg::R0, destination.address);
                         self.b.cmp(Reg::R0, 0);
-                        self.b.bne(3);
+                        self.b.bne(upon_truthy_input);
+
                         self.b.mov(Reg::R0, 1);
-                        self.b.b(2);
+                        self.b.b(done);
+
+                        self.b.label(upon_truthy_input);
                         self.b.mov(Reg::R0, 0);
+
+                        self.b.label(done);
                         self.b.str(Reg::R0, destination.address);
                     }
                 }
@@ -746,7 +770,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             self.b.str(Reg::R0, destination.address);
             self.b.footer(format!(
                 "=== END Call {1} => R0 => {} ===",
-                destination.address, call_target
+                self.b.format_address(&destination.address),
+                call_target
             ));
         } else {
             // no-op, we should've passed this info earlier.
@@ -821,20 +846,31 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.free_local(left_temp);
                 self.free_local(right_temp);
 
+                let is_false = self.b.create_label("LogicEqual__isFalse");
+                let done = self.b.create_label("LogicEqual__done");
+
                 self.b.cmp(Reg::R0, Reg::R1);
-                self.b.bne(3);
+                self.b.bne(is_false);
+
                 self.b.mov(Reg::R0, 1);
-                self.b.b(2);
+                self.b.b(done);
+
+                self.b.label(is_false);
                 self.b.mov(Reg::R0, 0);
+
+                self.b.label(done);
                 self.b.str(Reg::R0, destination.address);
             }
-            BinaryOp::Plus => {
+
+            BinaryOp::Plus | BinaryOp::Minus => {
                 if destination.is_nowhere() {
                     // discard the result.
                     return Ok(());
                 };
 
-                self.b.header(format!("=== binop({left} + {right}) ==="));
+                let opname = if op == BinaryOp::Plus { '+' } else { '-' };
+                self.b
+                    .header(format!("=== binop({left} {opname} {right}) ==="));
 
                 let left_temp = self.allocate_anon(destination.ctype);
                 let right_temp = self.allocate_anon(destination.ctype);
@@ -847,12 +883,18 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.free_local(left_temp);
                 self.free_local(right_temp);
 
-                self.b.add(Reg::R0, Reg::R0, Reg::R1);
+                match op {
+                    BinaryOp::Plus => self.b.add(Reg::R0, Reg::R0, Reg::R1),
+                    BinaryOp::Minus => self.b.sub(Reg::R0, Reg::R0, Reg::R1),
+                    _ => unreachable!(),
+                };
+
                 self.b.str(Reg::R0, destination.address);
 
                 self.b
-                    .footer(format!("=== END binop({left} + {right}) ==="));
+                    .footer(format!("=== END binop({left} {opname} {right}) ==="));
             }
+
             BinaryOp::ArrayIndex => {
                 if destination.is_nowhere() {
                     // discard the result.
@@ -930,12 +972,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.free_local(temp_index_storage);
                 self.free_local(temp_ptr_storage);
             }
-            BinaryOp::Minus => todo!(),
             BinaryOp::BitwiseLeftShift => todo!(),
             BinaryOp::BitwiseRightShift => todo!(),
-            BinaryOp::LessThan => todo!(),
             BinaryOp::LessOrEqual => todo!(),
-            BinaryOp::GreaterThan => {
+
+            BinaryOp::GreaterThan | BinaryOp::LessThan => {
                 let left_ctype = self.type_of_expr(left)?;
                 let right_ctype = self.type_of_expr(right)?;
 
@@ -955,13 +996,27 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.free_local(left_temp);
                 self.free_local(right_temp);
 
+                let upon_true = self.b.create_label("GreaterThan__uponTrue");
+                let done = self.b.create_label("GreaterThan__done");
+
                 self.b.cmp(Reg::R0, Reg::R1);
-                self.b.bne(3);
-                self.b.mov(Reg::R0, 1);
-                self.b.b(2);
+
+                match op {
+                    BinaryOp::LessThan => self.b.blt(upon_true),
+                    BinaryOp::GreaterThan => self.b.bgt(upon_true),
+                    _ => unreachable!(),
+                };
+
                 self.b.mov(Reg::R0, 0);
+                self.b.b(done);
+
+                self.b.label(upon_true);
+                self.b.mov(Reg::R0, 1);
+
+                self.b.label(done);
                 self.b.str(Reg::R0, destination.address);
             }
+
             BinaryOp::GreaterOrEqual => todo!(),
             BinaryOp::BitwiseXor => todo!(),
             BinaryOp::BitwiseAnd => todo!(),

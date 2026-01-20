@@ -7,7 +7,7 @@ use std::{
     str::Chars,
 };
 
-use crate::{id_type::GetAndIncrement, lexer::tokenkind::IdentId};
+use crate::{codegen::arm::AsmMode, id_type::GetAndIncrement, lexer::tokenkind::IdentId};
 
 id_type!(
     /// Unique identifier for a source file, either as the compilation root, or via an `#include`
@@ -27,6 +27,7 @@ pub(crate) struct Context<'a> {
 
     idents: RefCell<Vec<Rc<String>>>,
     macros: RefCell<HashMap<String, Rc<String>>>,
+    asm_mode: AsmMode,
 }
 
 struct SourceData {
@@ -36,6 +37,20 @@ struct SourceData {
 }
 
 impl<'a> Context<'a> {
+    pub fn new(asm_mode: AsmMode) -> Self {
+        let this = Self {
+            asm_mode,
+            ..Default::default()
+        };
+
+        match asm_mode {
+            AsmMode::ArmLite => this.preproc_define("__armlite__", "1"),
+            AsmMode::ArmV7 => this.preproc_define("__arm__", "1"),
+        };
+
+        this
+    }
+
     pub(crate) fn add_source_text(&self, text: String) -> SourceId {
         let id = self.next_source_id.get_and_increment();
 

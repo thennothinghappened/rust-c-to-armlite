@@ -13,6 +13,13 @@ use crate::{
 pub(super) mod file_builder;
 pub(super) mod func_builder;
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum AsmMode {
+    #[default]
+    ArmLite,
+    ArmV7,
+}
+
 enum Inst {
     InlineAsm(String),
     Comment(String, CommentPosition),
@@ -246,6 +253,7 @@ pub(super) enum RegOrImmediate {
     Reg(Reg),
     ImmI32(i32),
     ImmF32(f32),
+    StringId(StringId),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -271,49 +279,6 @@ pub(super) enum Reg {
     LinkReg,
 }
 
-impl Display for Address {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Address::RelativeIndex(addr) => write!(
-                f,
-                "[{base}{symbol}{offset}]",
-                base = addr.base,
-                symbol = if addr.negate_offset { '-' } else { '+' },
-                offset = addr.offset
-            ),
-
-            Address::LiteralIndex(LiteralIndexAddress { base, offset: 0 }) => write!(f, "[{base}]"),
-
-            Address::LiteralIndex(addr) => write!(
-                f,
-                "[{base}{symbol}#{offset}]",
-                base = addr.base,
-                symbol = if addr.offset < 0 { "-" } else { "+" },
-                offset = addr.offset.abs()
-            ),
-        }
-    }
-}
-
-impl Display for RegOrImmediate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            RegOrImmediate::Reg(reg) => reg.fmt(f),
-            RegOrImmediate::ImmI32(value) => write!(f, "#{value}"),
-            RegOrImmediate::ImmF32(value) => {
-                // Convert the number into the IEEE 754 32-bit float
-                // representation, but display it as a signed integer literal, since ARMLite doesn't
-                // support floats.
-                //
-                // For manipulating these floats, we need to do that in software, unfortunately.
-
-                let bitcasted_float = f32::to_bits(value) as i32;
-                write!(f, "#{bitcasted_float}")
-            }
-        }
-    }
-}
-
 impl From<Reg> for RegOrImmediate {
     fn from(value: Reg) -> Self {
         RegOrImmediate::Reg(value)
@@ -335,6 +300,12 @@ impl From<u32> for RegOrImmediate {
 impl From<f32> for RegOrImmediate {
     fn from(value: f32) -> Self {
         RegOrImmediate::ImmF32(value)
+    }
+}
+
+impl From<StringId> for RegOrImmediate {
+    fn from(value: StringId) -> Self {
+        RegOrImmediate::StringId(value)
     }
 }
 

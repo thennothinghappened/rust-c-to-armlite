@@ -13,7 +13,7 @@ use phf::phf_map;
 
 use crate::{
     codegen::{
-        arm::{file_builder::FileBuilder, func_builder, Address, Reg, RegOrImmediate},
+        arm::{file_builder::FileBuilder, func_builder, Address, AsmMode, Reg, RegOrImmediate},
         func_builder::FuncBuilder,
         func_generator::FuncGenerator,
     },
@@ -26,71 +26,10 @@ use crate::{
     },
 };
 
-mod arm;
+pub mod arm;
 mod func_generator;
 
 const WORD_SIZE: u32 = 4;
-
-static BUILTIN_FUNCS: phf::Map<&str, fn(&mut FuncBuilder)> = phf_map! {
-    "WriteChar" => |b| {
-        b.ldrb(Reg::R0, Reg::Sp+0);
-        b.asm("STRB R0, .WriteChar");
-        b.add(Reg::Sp, Reg::Sp, 4);
-        b.ret();
-    },
-    "WriteString" => |b| {
-        b.pop(Reg::R0);
-        b.asm("STR R0, .WriteString");
-        b.ret();
-    },
-    "WriteSignedNum" => |b| {
-        b.pop(Reg::R0);
-        b.asm("STR R0, .WriteSignedNum");
-        b.ret();
-    },
-    "WriteUnsignedNum" => |b| {
-        b.pop(Reg::R0);
-        b.asm("STR R0, .WriteUnsignedNum");
-        b.ret();
-    },
-    "ReadString" => |b| {
-        b.pop(Reg::R0);
-        b.asm("STR R0, .ReadString");
-        b.ret();
-    },
-    "memcpy" => |b| {
-        let loop_label = b.create_label("loop");
-        let done_label = b.create_label("done");
-
-        b.header("R0: Destination address\nR1: Source address\nR2: Byte count");
-        b.pop([Reg::R0, Reg::R1, Reg::R2]);
-
-        b.header("Check if caller asked us to copy 0 bytes for some reason.");
-        b.cmp(Reg::R2, 0);
-        b.beq(done_label);
-
-        b.label(loop_label);
-        b.asm("SUBS R2, R2, #1");
-        b.beq(done_label);
-        b.ldrb(Reg::R3, Reg::R1 + Reg::R2);
-        b.strb(Reg::R3, Reg::R0 + Reg::R2);
-        b.b(loop_label);
-
-        b.label(done_label);
-        b.ret();
-    },
-    "Panic" => |b| {
-        b.asm("MOV R0, #const_str_PanicMessage");
-        b.asm("STR R0, .WriteString");
-        b.call("WriteString");
-        b.asm("B c_halt");
-        b.asm("const_str_PanicMessage: .ASCIZ \"\\n\\nProgram panicked with error message: \"");
-    },
-    "Exit" => |b| {
-        b.pop(Reg::R0);
-        b.asm("B c_entry_post_run");
-    },
-};
 
 pub struct Generator {
     program: Program,
@@ -99,15 +38,86 @@ pub struct Generator {
 }
 
 impl Generator {
-    pub fn new(program: Program) -> Self {
+    pub fn new(program: Program, asm_mode: AsmMode) -> Self {
         Self {
             program,
-            file_builder: FileBuilder::default(),
+            file_builder: FileBuilder::new(asm_mode),
             ctype_size_cache: HashMap::default().into(),
         }
     }
 
     pub fn generate(self) -> String {
+        self.file_builder.create_function(
+            "start",
+            &CFuncType {
+                args: vec![],
+                returns: CPrimitive::Void.into(),
+                is_noreturn: true,
+            },
+            |b| {
+                const PRELUDE: &str = r#"
+; ==================================================================================================
+; C RUNTIME PRELUDE
+; ==================================================================================================
+
+c_entry:
+	BL fn_main
+c_entry_post_run:
+	MOV R4, R0						; Grab the return code.
+
+	MOV R0, #const_c_entry_exitcode_msg_start
+	PUSH {R0}
+	BL fn_WriteString
+
+	PUSH {R4}
+	BL fn_WriteSignedNum
+
+	MOV R0, #const_c_entry_exitcode_msg_end
+	PUSH {R0}
+	BL fn_WriteString
+c_halt:
+	HLT
+	B c_halt
+
+const_c_entry_exitcode_msg_start:	.ASCIZ "\nProgram exited with code "
+const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
+
+; ==================================================================================================
+; END OF PRELUDE
+; ==================================================================================================
+"#;
+                b.append_doc_line("C Runtime Entry Point");
+                b.append_doc_line("Initialises the C environment and calls main().");
+
+                b.call("main");
+
+                b.asm("c_entry_post_run:");
+                b.inline_comment("Grab the return code.");
+                b.mov(Reg::R4, Reg::R0);
+
+                let exitcode_msg_start = self
+                    .file_builder
+                    .create_string("\\nProgram exited with code ");
+
+                let exitcode_msg_end = self.file_builder.create_string(".\\n");
+
+                b.mov(Reg::R0, exitcode_msg_start);
+                b.push(Reg::R0);
+                b.call("WriteString");
+
+                b.push(Reg::R4);
+                b.call("WriteSignedNum");
+
+                b.mov(Reg::R0, exitcode_msg_end);
+                b.push(Reg::R0);
+                b.call("WriteString");
+
+                b.asm("c_halt:");
+                b.asm("HLT");
+                b.asm("B c_halt");
+            },
+        );
+
         let mut failures = Vec::<(&str, anyhow::Error)>::new();
 
         for (name, cfunc) in self
@@ -133,11 +143,6 @@ impl Generator {
                             )),
                         };
                     }
-                }
-
-                // Hack to allow built-ins (inline asm) to work with the existing system :)
-                if let Some(func) = BUILTIN_FUNCS.get(name) {
-                    return func(b);
                 }
 
                 if let Err(error) = FuncGenerator::new(&self, b).generate_func(cfunc) {
