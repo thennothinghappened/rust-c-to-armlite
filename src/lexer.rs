@@ -285,26 +285,31 @@ impl<'a> Lexer<'a> {
             };
         }
 
-        if self.accept_char('"') {
-            let mut escape_next = false;
+        if self.peek_char() == Some('"') {
+            let mut string = String::new();
 
-            let content = self.take_chars_while(|char| {
-                if escape_next {
-                    escape_next = false;
-                    return true;
-                }
+            while self.accept_char('"') {
+                let mut escape_next = false;
 
-                if char == '\\' {
-                    escape_next = true;
-                    return true;
-                }
+                string += self.take_chars_while(|char| {
+                    if escape_next {
+                        escape_next = false;
+                        return true;
+                    }
 
-                char != '"'
-            });
+                    if char == '\\' {
+                        escape_next = true;
+                        return true;
+                    }
 
-            self.consume_char('"');
+                    char != '"'
+                });
 
-            return TokenKind::StringLiteral(self.context.allocate_ident(content));
+                self.consume_char('"');
+                self.skip_whitespace_and_newlines();
+            }
+
+            return TokenKind::StringLiteral(self.context.allocate_ident(string));
         }
 
         if self.accept_char('\'') {
