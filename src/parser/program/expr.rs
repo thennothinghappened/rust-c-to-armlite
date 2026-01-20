@@ -27,10 +27,7 @@ pub enum BinaryOp {
     Minus,
     BitwiseLeftShift,
     BitwiseRightShift,
-    LessThan,
-    LessOrEqual,
-    GreaterThan,
-    GreaterOrEqual,
+    LogicOrdering(OrderMode),
     LogicEqual(CompareMode),
     BitwiseXor,
     BitwiseAnd,
@@ -53,6 +50,14 @@ pub enum CompareMode {
     NotEqual,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderMode {
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
+}
+
 impl BindingPower for BinaryOp {
     fn binding_strength(&self) -> i32 {
         // https://en.cppreference.com/w/c/language/operator_precedence.html
@@ -65,10 +70,7 @@ impl BindingPower for BinaryOp {
             Self::Plus => 4,
             Self::BitwiseRightShift => 5,
             Self::BitwiseLeftShift => 5,
-            Self::LessThan => 6,
-            Self::LessOrEqual => 6,
-            Self::GreaterThan => 6,
-            Self::GreaterOrEqual => 6,
+            Self::LogicOrdering(_) => 6,
             Self::LogicEqual(_) => 7,
             Self::BitwiseAnd => 8,
             Self::BitwiseXor => 9,
@@ -129,6 +131,12 @@ impl Display for Expr {
                 BinaryOp::Assign => write!(f, "{lhs} = {rhs}"),
                 BinaryOp::PlusAssign => write!(f, "{lhs} += {rhs}"),
                 BinaryOp::MinusAssign => write!(f, "{lhs} -= {rhs}"),
+                BinaryOp::LogicOrdering(mode) => match mode {
+                    OrderMode::LessThan => write!(f, "{lhs} < {rhs}"),
+                    OrderMode::LessOrEqual => write!(f, "{lhs} <= {rhs}"),
+                    OrderMode::GreaterThan => write!(f, "{lhs} > {rhs}"),
+                    OrderMode::GreaterOrEqual => write!(f, "{lhs} >= {rhs}"),
+                },
                 BinaryOp::LogicEqual(mode) => match mode {
                     CompareMode::Equal => write!(f, "{lhs} == {rhs}"),
                     CompareMode::NotEqual => write!(f, "{lhs} != {rhs}"),
@@ -138,10 +146,6 @@ impl Display for Expr {
                 BinaryOp::ArrayIndex => write!(f, "{lhs}[{rhs}]"),
                 BinaryOp::BitwiseLeftShift => write!(f, "{lhs} << {rhs}"),
                 BinaryOp::BitwiseRightShift => write!(f, "{lhs} >> {rhs}"),
-                BinaryOp::LessThan => write!(f, "{lhs} < {rhs}"),
-                BinaryOp::LessOrEqual => write!(f, "{lhs} <= {rhs}"),
-                BinaryOp::GreaterThan => write!(f, "{lhs} > {rhs}"),
-                BinaryOp::GreaterOrEqual => write!(f, "{lhs} >= {rhs}"),
                 BinaryOp::BitwiseXor => write!(f, "{lhs} ^ {rhs}"),
                 BinaryOp::BitwiseAnd => write!(f, "{lhs} & {rhs}"),
                 BinaryOp::BitwiseOr => write!(f, "{lhs} | {rhs}"),

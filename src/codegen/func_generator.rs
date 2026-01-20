@@ -13,7 +13,7 @@ use crate::{
         Address, Generator, Reg, RegOrImmediate, WORD_SIZE,
     },
     parser::program::{
-        expr::{call::Call, BinaryOp, CompareMode, Expr, UnaryOp},
+        expr::{call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
         statement::{Block, Statement},
         types::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType},
         Symbol,
@@ -978,9 +978,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             }
             BinaryOp::BitwiseLeftShift => todo!(),
             BinaryOp::BitwiseRightShift => todo!(),
-            BinaryOp::LessOrEqual => todo!(),
 
-            BinaryOp::GreaterThan | BinaryOp::LessThan => {
+            BinaryOp::LogicOrdering(mode) => {
                 let left_ctype = self.type_of_expr(left)?;
                 let right_ctype = self.type_of_expr(right)?;
 
@@ -1005,10 +1004,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 self.b.cmp(Reg::R0, Reg::R1);
 
-                match op {
-                    BinaryOp::LessThan => self.b.blt(upon_true),
-                    BinaryOp::GreaterThan => self.b.bgt(upon_true),
-                    _ => unreachable!(),
+                match mode {
+                    OrderMode::LessThan => self.b.blt(upon_true),
+                    OrderMode::GreaterThan => self.b.bgt(upon_true),
+                    _ => todo!(),
                 };
 
                 self.b.mov(Reg::R0, 0);
@@ -1021,7 +1020,6 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.str(Reg::R0, destination.address);
             }
 
-            BinaryOp::GreaterOrEqual => todo!(),
             BinaryOp::BitwiseXor => todo!(),
             BinaryOp::BitwiseAnd => todo!(),
             BinaryOp::BitwiseOr => todo!(),
@@ -1123,10 +1121,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 }
 
                 BinaryOp::LogicEqual(_)
-                | BinaryOp::LessThan
-                | BinaryOp::LessOrEqual
-                | BinaryOp::GreaterThan
-                | BinaryOp::GreaterOrEqual
+                | BinaryOp::LogicOrdering(_)
                 | BinaryOp::LogicAnd
                 | BinaryOp::LogicOr => Ok(CPrimitive::Bool.into()),
 
