@@ -34,7 +34,7 @@ size_t strnlen_s(char* buffer, size_t bufferLength)
 }
 
 [[armlite_c::raw_assembly]]
-void memcpy(char *destination, char *source, size_t count)
+void memcpy(void *destination, void *source, size_t count)
 {
 	// R0: Destination address
 	// R1: Source address
