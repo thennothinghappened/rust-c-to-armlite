@@ -1,3 +1,4 @@
 -xc
+-std=c23
 -ffreestanding
 --target=arm

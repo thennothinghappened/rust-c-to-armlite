@@ -96,15 +96,12 @@ impl<'a> Lexer<'a> {
             '}' => Some(TokenKind::CloseCurly),
             '(' => Some(TokenKind::OpenParen),
             ')' => Some(TokenKind::CloseParen),
-            '[' => Some(TokenKind::OpenSquare),
-            ']' => Some(TokenKind::CloseSquare),
             ';' => Some(TokenKind::Semicolon),
             '*' => Some(TokenKind::Star),
             ',' => Some(TokenKind::Comma),
             '<' => Some(TokenKind::LessThan),
             '>' => Some(TokenKind::GreaterThan),
             '?' => Some(TokenKind::QuestionMark),
-            ':' => Some(TokenKind::Colon),
             '!' => Some(TokenKind::BooleanNot),
             _ => None,
         }) {
@@ -124,6 +121,30 @@ impl<'a> Lexer<'a> {
                 TokenKind::BooleanOr
             } else {
                 TokenKind::BitwiseOr
+            };
+        }
+
+        if self.accept_char('[') {
+            return if self.accept_char('[') {
+                TokenKind::OpenAttributeList
+            } else {
+                TokenKind::OpenSquare
+            };
+        }
+
+        if self.accept_char(']') {
+            return if self.accept_char(']') {
+                TokenKind::CloseAttributeList
+            } else {
+                TokenKind::CloseSquare
+            };
+        }
+
+        if self.accept_char(':') {
+            return if self.accept_char(':') {
+                TokenKind::NamespaceAccessor
+            } else {
+                TokenKind::Colon
             };
         }
 

@@ -73,6 +73,46 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_func_or_var_decl(&mut self) -> Result<Option<Statement>, ParseError> {
+        let mut is_raw_assembly = false;
+        let mut is_noreturn = false;
+
+        if self.accept(TokenKind::OpenAttributeList) {
+            while !self.accept(TokenKind::CloseAttributeList) {
+                let namespace_or_name = self.consume_ident()?;
+
+                let (namespace, name) = if self.accept(TokenKind::NamespaceAccessor) {
+                    let name = self.consume_ident()?;
+
+                    (Some(namespace_or_name), name)
+                } else {
+                    (None, namespace_or_name)
+                };
+
+                match namespace.as_deref() {
+                    // One of our custom attributes!
+                    Some("armlite_c") => match name.as_str() {
+                        "raw_assembly" => is_raw_assembly = true,
+                        _ => return self.error(format!("Unknown attribute armlite_c::{name}")),
+                    },
+
+                    // Standard attribute.
+                    None => match name.as_str() {
+                        "nodiscard" => is_noreturn = true,
+                        "deprecated" => (),
+                        _ => (),
+                    },
+
+                    // Some other compiler's namespace.
+                    _ => {}
+                };
+
+                if !self.accept(TokenKind::Comma) {
+                    self.expect(TokenKind::CloseAttributeList)?;
+                    break;
+                }
+            }
+        }
+
         let is_extern = self.accept(TokenKind::Extern);
 
         // This might be a lone type declaration, or it might be the start of a
@@ -97,12 +137,14 @@ impl<'a> Parser<'a> {
                 sig_id: self.program.func_type(CFuncType {
                     args,
                     returns: return_ctype,
+                    is_noreturn,
                 }),
                 body: if is_extern {
                     CFuncBody::Extern
                 } else {
                     CFuncBody::None
                 },
+                is_raw_assembly,
             };
 
             // Pre-declare the function w/o body, so it is available for recursion.
@@ -150,6 +192,7 @@ impl<'a> Parser<'a> {
                 this_type = CType::AsIs(CConcreteType::Func(self.program.func_type(CFuncType {
                     args,
                     returns: self.program.get_ctype(return_ctype_id),
+                    is_noreturn: false,
                 })));
             }
 

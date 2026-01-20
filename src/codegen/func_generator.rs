@@ -199,10 +199,24 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             CFuncBody::None => bail!("Function {cfunc:?} left undefined!"),
         };
 
+        if cfunc.is_raw_assembly {
+            self.generate_block(block)?;
+            return Ok(());
+        }
+
         self.b.push([Reg::R11, Reg::LinkReg]);
         self.b.mov(Reg::R11, Reg::Sp);
 
         self.generate_block(block)?;
+
+        if self
+            .generator
+            .program
+            .get_cfunc_sig(cfunc.sig_id)
+            .is_noreturn
+        {
+            return Ok(());
+        }
 
         self.b.label(self.done_label);
         self.b.mov(Reg::Sp, Reg::R11);

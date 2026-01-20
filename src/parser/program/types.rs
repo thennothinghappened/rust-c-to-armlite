@@ -146,12 +146,14 @@ impl From<CFuncTypeId> for CType {
 pub struct CFuncType {
     pub args: Vec<Member>,
     pub returns: CType,
+    pub is_noreturn: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CFunc {
     pub sig_id: CFuncTypeId,
     pub body: CFuncBody,
+    pub is_raw_assembly: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
