@@ -20,7 +20,7 @@ int PrintFormatted(char *format, int *argsArray)
 
 		charIndex = charIndex + 1;
 
-		if (!(c == '%'))
+		if (c != '%')
 		{
 			WriteChar(c);
 			continue;

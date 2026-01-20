@@ -31,7 +31,7 @@ pub enum BinaryOp {
     LessOrEqual,
     GreaterThan,
     GreaterOrEqual,
-    LogicEqual,
+    LogicEqual(CompareMode),
     BitwiseXor,
     BitwiseAnd,
     BitwiseOr,
@@ -45,6 +45,12 @@ pub enum BinaryOp {
 
     /// Comma operator: evaluate LHS, discard, evaluate RHS, return.
     AndThen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompareMode {
+    Equal,
+    NotEqual,
 }
 
 impl BindingPower for BinaryOp {
@@ -63,7 +69,7 @@ impl BindingPower for BinaryOp {
             Self::LessOrEqual => 6,
             Self::GreaterThan => 6,
             Self::GreaterOrEqual => 6,
-            Self::LogicEqual => 7,
+            Self::LogicEqual(_) => 7,
             Self::BitwiseAnd => 8,
             Self::BitwiseXor => 9,
             Self::BitwiseOr => 10,
@@ -123,7 +129,10 @@ impl Display for Expr {
                 BinaryOp::Assign => write!(f, "{lhs} = {rhs}"),
                 BinaryOp::PlusAssign => write!(f, "{lhs} += {rhs}"),
                 BinaryOp::MinusAssign => write!(f, "{lhs} -= {rhs}"),
-                BinaryOp::LogicEqual => write!(f, "{lhs} == {rhs}"),
+                BinaryOp::LogicEqual(mode) => match mode {
+                    CompareMode::Equal => write!(f, "{lhs} == {rhs}"),
+                    CompareMode::NotEqual => write!(f, "{lhs} != {rhs}"),
+                },
                 BinaryOp::Plus => write!(f, "{lhs} + {rhs}"),
                 BinaryOp::Minus => write!(f, "{lhs} - {rhs}"),
                 BinaryOp::ArrayIndex => write!(f, "{lhs}[{rhs}]"),

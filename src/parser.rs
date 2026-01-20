@@ -7,7 +7,7 @@ use crate::{
     parser::{
         block_builder::BlockBuilder,
         program::{
-            expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
+            expr::{call::Call, BinaryOp, BindingPower, CompareMode, Expr, UnaryOp},
             statement::{Block, Statement, Variable},
             types::{
                 CConcreteType, CFunc, CFuncBody, CFuncType, CFuncTypeId, CPrimitive, CStruct,
@@ -427,7 +427,8 @@ impl<'a> Parser<'a> {
                 TokenKind::Assign => Some(BinaryOp::Assign),
                 TokenKind::PlusAssign => Some(BinaryOp::PlusAssign),
                 TokenKind::MinusAssign => Some(BinaryOp::MinusAssign),
-                TokenKind::BooleanEqual => Some(BinaryOp::LogicEqual),
+                TokenKind::BooleanEqual => Some(BinaryOp::LogicEqual(CompareMode::Equal)),
+                TokenKind::BooleanNotEqual => Some(BinaryOp::LogicEqual(CompareMode::NotEqual)),
                 TokenKind::BooleanAnd => Some(BinaryOp::LogicAnd),
                 TokenKind::BooleanOr => Some(BinaryOp::LogicOr),
                 TokenKind::LessThan => Some(BinaryOp::LessThan),

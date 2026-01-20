@@ -13,7 +13,7 @@ use crate::{
         Address, Generator, Reg, RegOrImmediate, WORD_SIZE,
     },
     parser::program::{
-        expr::{call::Call, BinaryOp, Expr, UnaryOp},
+        expr::{call::Call, BinaryOp, CompareMode, Expr, UnaryOp},
         statement::{Block, Statement},
         types::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType},
         Symbol,
@@ -827,7 +827,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
             BinaryOp::MinusAssign => {}
 
-            BinaryOp::LogicEqual => {
+            BinaryOp::LogicEqual(mode) => {
                 let left_ctype = self.type_of_expr(left)?;
                 let left_temp = self.allocate_anon(left_ctype);
 
@@ -850,7 +850,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let done = self.b.create_label("LogicEqual__done");
 
                 self.b.cmp(Reg::R0, Reg::R1);
-                self.b.bne(is_false);
+
+                match mode {
+                    CompareMode::Equal => self.b.bne(is_false),
+                    CompareMode::NotEqual => self.b.beq(is_false),
+                };
 
                 self.b.mov(Reg::R0, 1);
                 self.b.b(done);
@@ -1118,7 +1122,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.type_of_expr(left)
                 }
 
-                BinaryOp::LogicEqual
+                BinaryOp::LogicEqual(_)
                 | BinaryOp::LessThan
                 | BinaryOp::LessOrEqual
                 | BinaryOp::GreaterThan

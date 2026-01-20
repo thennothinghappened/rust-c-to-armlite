@@ -102,10 +102,17 @@ impl<'a> Lexer<'a> {
             '<' => Some(TokenKind::LessThan),
             '>' => Some(TokenKind::GreaterThan),
             '?' => Some(TokenKind::QuestionMark),
-            '!' => Some(TokenKind::BooleanNot),
             _ => None,
         }) {
             return basic_token;
+        }
+
+        if self.accept_char('!') {
+            return if self.accept_char('=') {
+                TokenKind::BooleanNotEqual
+            } else {
+                TokenKind::BooleanNot
+            };
         }
 
         if self.accept_char('&') {

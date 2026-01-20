@@ -8,7 +8,7 @@ size_t strlen(char *buffer)
 {
 	size_t index = 0;
 
-	while (!(buffer[index] == '\0'))
+	while (buffer[index] != '\0')
 	{
 		index = index + 1;
 	}
@@ -20,7 +20,7 @@ size_t strnlen_s(char* buffer, size_t bufferLength)
 {
 	size_t index = 0;
 
-	while (!(index == bufferLength))
+	while (index != bufferLength)
 	{
 		if (buffer[index] == 0)
 		{
