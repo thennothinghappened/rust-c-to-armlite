@@ -12,7 +12,7 @@ use crate::{
     parser::program::{
         expr::{call::Call, BinaryOp, Expr, UnaryOp},
         statement::{Block, Statement},
-        types::{CConcreteType, CFunc, CPrimitive, CType},
+        types::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType},
         Symbol,
     },
 };
@@ -193,8 +193,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     }
 
     pub(super) fn generate_func(mut self, cfunc: &CFunc) -> anyhow::Result<()> {
-        let Some(block) = &cfunc.body else {
-            panic!("Function {cfunc:?} left undefined!");
+        let block = match &cfunc.body {
+            CFuncBody::Defined(block) => block,
+            CFuncBody::Extern => return Ok(()),
+            CFuncBody::None => bail!("Function {cfunc:?} left undefined!"),
         };
 
         self.b.push([Reg::R11, Reg::LinkReg]);

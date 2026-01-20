@@ -21,7 +21,7 @@ use crate::{
     parser::program::{
         expr::{call::Call, BinaryOp, Expr, UnaryOp},
         statement::{Block, Statement, Variable},
-        types::{CConcreteType, CFunc, CFuncType, CPrimitive, CType, CTypeId},
+        types::{CConcreteType, CFunc, CFuncBody, CFuncType, CPrimitive, CType, CTypeId},
         Program, Symbol,
     },
 };
@@ -110,7 +110,11 @@ impl Generator {
     pub fn generate(self) -> String {
         let mut failures = Vec::<(&str, anyhow::Error)>::new();
 
-        for (name, cfunc) in self.program.get_defined_functions() {
+        for (name, cfunc) in self
+            .program
+            .get_defined_functions()
+            .filter(|(_, cfunc)| !matches!(cfunc.body, CFuncBody::Extern))
+        {
             let sig = self.program.get_cfunc_sig(cfunc.sig_id);
 
             self.file_builder.create_function(name, sig, |b| {

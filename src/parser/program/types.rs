@@ -151,7 +151,14 @@ pub struct CFuncType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CFunc {
     pub sig_id: CFuncTypeId,
-    pub body: Option<Block>,
+    pub body: CFuncBody,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CFuncBody {
+    Defined(Block),
+    Extern,
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -362,6 +362,7 @@ impl<'a> Lexer<'a> {
                 "void" => Some(TokenKind::Void),
                 "sizeof" => Some(TokenKind::SizeOf),
                 "const" => Some(TokenKind::Const),
+                "extern" => Some(TokenKind::Extern),
                 _ => None,
             } {
                 return token;

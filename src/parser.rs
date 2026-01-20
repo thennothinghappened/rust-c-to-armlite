@@ -10,8 +10,8 @@ use crate::{
             expr::{call::Call, BinaryOp, BindingPower, Expr, UnaryOp},
             statement::{Block, Statement, Variable},
             types::{
-                CConcreteType, CFunc, CFuncType, CFuncTypeId, CPrimitive, CStruct, CType, Member,
-                TypeDef,
+                CConcreteType, CFunc, CFuncBody, CFuncType, CFuncTypeId, CPrimitive, CStruct,
+                CType, Member, TypeDef,
             },
             Program, StructBuilder, Symbol,
         },
@@ -73,6 +73,8 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_func_or_var_decl(&mut self) -> Result<Option<Statement>, ParseError> {
+        let is_extern = self.accept(TokenKind::Extern);
+
         // This might be a lone type declaration, or it might be the start of a
         // function, or a variable...
         let initial_type = self.parse_type()?;
@@ -96,7 +98,11 @@ impl<'a> Parser<'a> {
                     args,
                     returns: return_ctype,
                 }),
-                body: None,
+                body: if is_extern {
+                    CFuncBody::Extern
+                } else {
+                    CFuncBody::None
+                },
             };
 
             // Pre-declare the function w/o body, so it is available for recursion.
@@ -106,7 +112,7 @@ impl<'a> Parser<'a> {
 
             // May or may not have function body.
             if self.next_is(TokenKind::OpenCurly) {
-                func.body = Some(self.parse_block()?);
+                func.body = CFuncBody::Defined(self.parse_block()?);
                 self.program.declare_function(name, func).unwrap();
             } else {
                 self.expect(TokenKind::Semicolon)?;
