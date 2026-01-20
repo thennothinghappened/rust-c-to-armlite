@@ -31,7 +31,7 @@ int main() {
 	size_t nameLength = strnlen_s(name, sizeof(name));
 	
 	
-	if (nameLength == 0 || nameLength == 1 || nameLength == 2)
+	if (nameLength < 3)
 	{
 		WriteString("Your name is less than 3 letters long.");
 	}
