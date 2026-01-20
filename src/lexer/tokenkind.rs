@@ -42,6 +42,7 @@ pub(crate) enum TokenKind {
     Const,
     Extern,
     Signed,
+    Asm,
     Unsigned,
     Short,
     Bool,
@@ -139,6 +140,7 @@ impl Display for TokenKind {
                     return write!(f, "<<Preprocessor-thrown error>>"),
                 TokenKind::DiscardMarker => "<<Internal Discard Marker>>",
                 TokenKind::Eof => "<<End Of File>>",
+                TokenKind::Asm => "__asm__",
             }
         )
     }

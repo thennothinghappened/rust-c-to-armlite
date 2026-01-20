@@ -58,6 +58,15 @@ impl<'a> Parser<'a> {
         None
     }
 
+    pub(super) fn accept_string(&mut self) -> Option<String> {
+        if let TokenKind::StringLiteral(id) = self.lexer.peek().kind {
+            self.lexer.next();
+            return Some(self.lexer.context.get_ident(id));
+        }
+
+        None
+    }
+
     pub(super) fn consume(&mut self) -> Result<Token, ParseError> {
         let token = self.lexer.next();
 
@@ -95,6 +104,22 @@ impl<'a> Parser<'a> {
                 span: actual.span,
                 kind: ParseErrorKind::WrongToken {
                     expected: TokenKind::Ident(0),
+                    actual: actual.kind,
+                },
+            });
+        };
+
+        Ok(ident)
+    }
+
+    pub(super) fn consume_string(&mut self) -> Result<String, ParseError> {
+        let Some(ident) = self.accept_string() else {
+            let actual = self.peek();
+
+            return Err(ParseError {
+                span: actual.span,
+                kind: ParseErrorKind::WrongToken {
+                    expected: TokenKind::StringLiteral(0),
                     actual: actual.kind,
                 },
             });

@@ -363,6 +363,7 @@ impl<'a> Lexer<'a> {
                 "sizeof" => Some(TokenKind::SizeOf),
                 "const" => Some(TokenKind::Const),
                 "extern" => Some(TokenKind::Extern),
+                "__asm__" => Some(TokenKind::Asm),
                 _ => None,
             } {
                 return token;

@@ -306,6 +306,16 @@ impl<'a> Parser<'a> {
                 Ok(Statement::Continue)
             }
 
+            TokenKind::Asm => {
+                self.next();
+
+                self.expect(TokenKind::OpenParen)?;
+                let content = self.consume_string()?;
+                self.expect(TokenKind::CloseParen)?;
+
+                Ok(Statement::Asm(content))
+            }
+
             _ => {
                 // Whatever is left could either be a variable declaration, or could be a lone
                 // expression. We'll cheat by spawning two clones of this parser and parsing both
