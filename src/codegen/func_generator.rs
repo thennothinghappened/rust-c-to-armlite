@@ -999,8 +999,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.free_local(left_temp);
                 self.free_local(right_temp);
 
-                let upon_true = self.b.create_label("GreaterThan__uponTrue");
-                let done = self.b.create_label("GreaterThan__done");
+                let upon_true = self.b.create_label("LogicOrdering__uponTrue");
+                let done = self.b.create_label("LogicOrdering__done");
 
                 self.b.cmp(Reg::R0, Reg::R1);
 
