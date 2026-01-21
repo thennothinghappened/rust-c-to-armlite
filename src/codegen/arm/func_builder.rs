@@ -6,6 +6,7 @@ use std::{
 };
 
 use bimap::BiMap;
+use indexmap::IndexMap;
 use itertools::Itertools;
 
 use crate::{
@@ -28,6 +29,21 @@ pub(crate) struct FuncBuilder<'a> {
     labels: HashMap<LabelId, String>,
     next_label_id: Cell<LabelId>,
     pub asm_mode: AsmMode,
+    register_pool: IndexMap<Reg, RegStatus>,
+}
+
+struct RegStatus {
+    available: bool,
+    clobbered: bool,
+}
+
+impl Default for RegStatus {
+    fn default() -> Self {
+        Self {
+            available: true,
+            clobbered: false,
+        }
+    }
 }
 
 impl<'a> FuncBuilder<'a> {
@@ -40,6 +56,64 @@ impl<'a> FuncBuilder<'a> {
             next_label_id: Cell::default(),
             labels: HashMap::default(),
             asm_mode,
+            register_pool: IndexMap::from([
+                (Reg::R0, RegStatus::default()),
+                (Reg::R1, RegStatus::default()),
+                (Reg::R2, RegStatus::default()),
+                (Reg::R3, RegStatus::default()),
+                // If we allocate any of these, we'll have to deal with clobbering. I really don't
+                // want to deal with that because it'll probably require rewriting a bunch of stuff
+                // to express referencing arguments rather than as`[R11+#value]`, so that the offset
+                // can be calculated after we know how many registers got pushed at the start, or
+                // introducing a proper IR, which I'm not yet confident enough that I'd make the
+                // right abstractions in doing so.
+                //
+                // (Reg::R4, RegStatus::default()),
+                // (Reg::R5, RegStatus::default()),
+                // (Reg::R6, RegStatus::default()),
+                // (Reg::R7, RegStatus::default()),
+                // (Reg::R8, RegStatus::default()),
+                // (Reg::R9, RegStatus::default()),
+                // (Reg::R10, RegStatus::default()),
+                // (Reg::R12, RegStatus::default()),
+                // (Reg::R13, RegStatus::default()),
+                // (Reg::R14, RegStatus::default()),
+                // (Reg::R15, RegStatus::default()),
+            ]),
+        }
+    }
+
+    pub fn reg(&mut self) -> Reg {
+        for (reg, status) in self.register_pool.iter_mut() {
+            if status.available {
+                status.available = false;
+                status.clobbered = true;
+
+                return *reg;
+            }
+        }
+
+        panic!("No registers left!")
+    }
+
+    pub fn regs<const N: usize>(&mut self) -> [Reg; N] {
+        let mut array = [Reg::ProgCounter; N];
+
+        for reg in &mut array {
+            *reg = self.reg();
+        }
+
+        array
+    }
+
+    pub fn release_reg<const N: usize>(&mut self, reg: impl Into<[Reg; N]>) {
+        for reg in reg.into() {
+            assert!(
+                self.register_pool[&reg].available.not(),
+                "Attempted double-free on {reg}"
+            );
+
+            self.register_pool[&reg].available = true;
         }
     }
 

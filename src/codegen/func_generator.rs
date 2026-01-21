@@ -1,14 +1,15 @@
 use std::{
-    collections::{HashMap, VecDeque},
-    ops::{Shl, Shr},
+    collections::{HashMap, HashSet, VecDeque},
+    ops::{Not, Shl, Shr},
 };
 
 use anyhow::{bail, Context};
+use indexmap::IndexMap;
 use itertools::Itertools;
 
 use crate::{
     codegen::{
-        arm::LiteralIndexAddress,
+        arm::{LiteralIndexAddress, OneOrMoreRegisters},
         func_builder::{FuncBuilder, LabelId},
         Address, Generator, Reg, RegOrImmediate, WORD_SIZE,
     },
@@ -207,6 +208,18 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         None
     }
 
+    pub fn reg(&mut self) -> Reg {
+        self.b.reg()
+    }
+
+    pub fn regs<const N: usize>(&mut self) -> [Reg; N] {
+        self.b.regs()
+    }
+
+    pub fn release_reg<const N: usize>(&mut self, reg: impl Into<[Reg; N]>) {
+        self.b.release_reg(reg);
+    }
+
     pub(super) fn generate_func(mut self, cfunc: &CFunc) -> anyhow::Result<()> {
         let block = match &cfunc.body {
             CFuncBody::Defined(block) => block,
@@ -288,10 +301,16 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     // the caller pushes an address where they want us to copy the returned
                     // (presumably) struct to to return it to them, rather than splitting it
                     // across registers or something.
+                    let address_holder = self.reg();
+                    let value_holder = self.reg();
+
                     self.b.inline_comment("Grab the return storage address.");
-                    self.b.ldr(Reg::R0, stack_offset(4));
-                    self.b.ldr(Reg::R1, temp_storage);
-                    self.b.str(Reg::R1, Address::at(Reg::R0));
+                    self.b.ldr(address_holder, stack_offset(4));
+                    self.b.ldr(value_holder, temp_storage);
+                    self.b.str(value_holder, Address::at(address_holder));
+
+                    self.release_reg(value_holder);
+                    self.release_reg(address_holder);
                 } else {
                     // we can neatly return the value in one register. yay!
                     self.b.inline_comment("Put the returned value in R0.");
@@ -340,10 +359,14 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
                 self.generate_expr(condition, temp_condition_storage)?;
 
-                self.b.ldr(Reg::R0, temp_condition_storage);
+                let condition_holder = self.reg();
+
+                self.b.ldr(condition_holder, temp_condition_storage);
                 self.free_local(temp_condition_storage);
 
-                self.b.cmp(Reg::R0, 0);
+                self.b.cmp(condition_holder, 0);
+
+                self.release_reg(condition_holder);
 
                 if if_false.is_some() {
                     self.b.beq(if_false_label);
@@ -357,7 +380,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 if let Some(if_false) = if_false {
                     self.b.b(done_label);
 
-                    self.b.header(format!("### else"));
+                    self.b.header("### else");
                     self.b.label(if_false_label);
                     self.generate_stmt(if_false)?;
                 }
@@ -384,8 +407,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.label(loop_label);
                 self.generate_expr(condition, temp_condition_storage)?;
 
-                self.b.ldr(Reg::R0, temp_condition_storage);
-                self.b.cmp(Reg::R0, 0);
+                let condition_holder = self.reg();
+
+                self.b.ldr(condition_holder, temp_condition_storage);
+                self.b.cmp(condition_holder, 0);
+
+                self.release_reg(condition_holder);
+
                 self.b.beq(done_label);
 
                 self.b.header("do");
@@ -443,15 +471,22 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         match expr {
             Expr::StringLiteral(value) => {
                 let string_id = self.generator.file_builder.create_string(value);
+                let string_address_holder = self.reg();
 
-                self.b.mov(Reg::R0, string_id);
-                self.b.str(Reg::R0, destination.address);
+                self.b.mov(string_address_holder, string_id);
+                self.b.str(string_address_holder, destination.address);
+
+                self.release_reg(string_address_holder);
             }
 
             Expr::IntLiteral(value) => {
                 // ints are nice and relaxed :)
-                self.b.mov(Reg::R0, *value);
-                self.b.str(Reg::R0, destination.address);
+                let int_holder = self.reg();
+
+                self.b.mov(int_holder, *value);
+                self.b.str(int_holder, destination.address);
+
+                self.release_reg(int_holder);
             }
 
             Expr::Reference(name) => {
@@ -462,43 +497,35 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         self.generator.program.format_ctype(destination.ctype)
                     ));
 
-                    match source.ctype {
-                        CType::AsIs(cconcrete_type) => {
-                            self.b.ldr(Reg::R0, source);
-                            self.b.str(Reg::R0, destination.address);
+                    match (source.ctype, destination.ctype) {
+                        (CType::AsIs(_), CType::AsIs(_))
+                        | (CType::PointerTo(_), CType::PointerTo(_)) => {
+                            let value_holder = self.reg();
+
+                            self.b.ldr(value_holder, source);
+                            self.b.str(value_holder, destination.address);
+
+                            self.release_reg(value_holder);
                         }
 
-                        CType::PointerTo(ctype_id) => match destination.ctype {
-                            CType::AsIs(cconcrete_type) => {
-                                panic!("can't cast a pointer to a value type")
-                            }
+                        (CType::ArrayOf(_, _), CType::ArrayOf(_, _)) => {
+                            todo!("array copying!");
+                        }
 
-                            CType::PointerTo(_) => {
-                                self.b.ldr(Reg::R0, source);
-                                self.b.str(Reg::R0, destination.address);
-                            }
+                        (CType::ArrayOf(_, _), CType::PointerTo(_)) => {
+                            let address_holder = self.reg();
 
-                            CType::ArrayOf(ctype_id, size) => todo!("load array from pointer"),
-                        },
+                            self.b.load_address(address_holder, source);
+                            self.b.str(address_holder, destination.address);
 
-                        CType::ArrayOf(ctype_id, _) => match destination.ctype {
-                            CType::AsIs(cconcrete_type) => {
-                                panic!(
-                                    "can't cast an array ({array}) to a value type ({value})",
-                                    array = self.generator.program.format_ctype(source.ctype),
-                                    value = self.generator.program.format_ctype(cconcrete_type)
-                                )
-                            }
+                            self.release_reg(address_holder);
+                        }
 
-                            CType::PointerTo(ctype_id) => {
-                                self.b.load_address(Reg::R0, source);
-                                self.b.str(Reg::R0, destination.address);
-                            }
-
-                            CType::ArrayOf(ctype_id, _) => {
-                                todo!("array copying!")
-                            }
-                        },
+                        _ => bail!(
+                            "Can't cast type `{}` to `{}`",
+                            self.generator.program.format_ctype(source.ctype),
+                            self.generator.program.format_ctype(destination.ctype)
+                        ),
                     }
 
                     self.b.footer(format!("=== done query `{name}` ==="));
@@ -511,8 +538,12 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 match symbol {
                     Symbol::Func(cfunc) => {
-                        self.b.asm(format!("MOV R0, fn_{name}"));
-                        self.b.str(Reg::R0, destination.address);
+                        let reg = self.reg();
+
+                        self.b.asm(format!("MOV {reg}, fn_{name}"));
+                        self.b.str(reg, destination.address);
+
+                        self.release_reg(reg);
                     }
 
                     Symbol::Var(var_ctype, _) => {
@@ -523,9 +554,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                             // *any* types, and use it instead rather than bespoke solutions
                             // everywhere for every single operation.
                             CType::AsIs(cconcrete_type) => {
-                                self.b.asm(format!("MOV R0, var_{name}"));
-                                self.b.ldr(Reg::R0, Reg::R0 + 0);
-                                self.b.str(Reg::R0, destination.address);
+                                let reg = self.reg();
+
+                                self.b.asm(format!("MOV {reg}, var_{name}"));
+                                self.b.ldr(reg, reg + 0);
+                                self.b.str(reg, destination.address);
+
+                                self.release_reg(reg);
                             }
 
                             CType::PointerTo(ctype_id) => match destination.ctype {
@@ -534,9 +569,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                                 }
 
                                 CType::PointerTo(ctype_id) => {
-                                    self.b.asm(format!("MOV R0, var_{name}"));
-                                    self.b.ldr(Reg::R0, Reg::R0 + 0);
-                                    self.b.str(Reg::R0, destination.address);
+                                    let reg = self.reg();
+
+                                    self.b.asm(format!("MOV {reg}, var_{name}"));
+                                    self.b.ldr(reg, reg + 0);
+                                    self.b.str(reg, destination.address);
+
+                                    self.release_reg(reg);
                                 }
 
                                 CType::ArrayOf(ctype_id, size) => {
@@ -550,9 +589,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                                 }
 
                                 CType::PointerTo(ctype_id) => {
-                                    self.b.asm(format!("MOV R0, var_{name}"));
-                                    self.b.ldr(Reg::R0, Reg::R0 + 0);
-                                    self.b.str(Reg::R0, destination.address);
+                                    let reg = self.reg();
+
+                                    self.b.asm(format!("MOV {reg}, var_{name}"));
+                                    self.b.ldr(reg, reg + 0);
+                                    self.b.str(reg, destination.address);
+
+                                    self.release_reg(reg);
                                 }
 
                                 CType::ArrayOf(ctype_id, _) => {
@@ -593,36 +636,56 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                                 CPrimitive::Void => (),
 
                                 CPrimitive::Bool | CPrimitive::Char | CPrimitive::UnsignedChar => {
-                                    self.b.mov(Reg::R0, size & 0xff);
-                                    self.b.strb(Reg::R0, destination.address);
+                                    let reg = self.reg();
+
+                                    self.b.mov(reg, size & 0xff);
+                                    self.b.strb(reg, destination.address);
+
+                                    self.release_reg(reg);
                                 }
 
                                 CPrimitive::SignedChar => {
-                                    self.b.mov(Reg::R0, size & 0x7f);
-                                    self.b.strb(Reg::R0, destination.address);
+                                    let reg = self.reg();
+
+                                    self.b.mov(reg, size & 0x7f);
+                                    self.b.strb(reg, destination.address);
+
+                                    self.release_reg(reg);
                                 }
 
                                 CPrimitive::Short | CPrimitive::UnsignedShort => {
-                                    self.b.ldr(Reg::R0, destination.address);
-                                    self.b.shr(Reg::R0, Reg::R0, 16);
-                                    self.b.shl(Reg::R0, Reg::R0, 16);
-                                    self.b.or(Reg::R0, Reg::R0, size & 0xffff);
-                                    self.b.str(Reg::R0, destination.address);
+                                    let reg = self.reg();
+
+                                    self.b.ldr(reg, destination.address);
+                                    self.b.shr(reg, reg, 16);
+                                    self.b.shl(reg, reg, 16);
+                                    self.b.or(reg, reg, size & 0xffff);
+                                    self.b.str(reg, destination.address);
+
+                                    self.release_reg(reg);
                                 }
 
                                 CPrimitive::Int
                                 | CPrimitive::UnsignedInt
                                 | CPrimitive::Long
                                 | CPrimitive::UnsignedLong => {
-                                    self.b.mov(Reg::R0, size);
-                                    self.b.str(Reg::R0, destination.address);
+                                    let reg = self.reg();
+
+                                    self.b.mov(reg, size);
+                                    self.b.str(reg, destination.address);
+
+                                    self.release_reg(reg);
                                 }
 
                                 CPrimitive::LongLong | CPrimitive::UnsignedLongLong => {}
 
                                 CPrimitive::Float | CPrimitive::Double | CPrimitive::LongDouble => {
-                                    self.b.mov(Reg::R0, size as f32);
-                                    self.b.str(Reg::R0, destination.address);
+                                    let reg = self.reg();
+
+                                    self.b.mov(reg, size as f32);
+                                    self.b.str(reg, destination.address);
+
+                                    self.release_reg(reg);
                                 }
                             },
                         },
@@ -644,18 +707,22 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         let upon_truthy_input = self.b.create_label("BooleanNot__uponTruthyInput");
                         let done = self.b.create_label("BooleanNot__done");
 
-                        self.b.ldr(Reg::R0, destination.address);
-                        self.b.cmp(Reg::R0, 0);
+                        let reg = self.reg();
+
+                        self.b.ldr(reg, destination.address);
+                        self.b.cmp(reg, 0);
                         self.b.bne(upon_truthy_input);
 
-                        self.b.mov(Reg::R0, 1);
+                        self.b.mov(reg, 1);
                         self.b.b(done);
 
                         self.b.label(upon_truthy_input);
-                        self.b.mov(Reg::R0, 0);
+                        self.b.mov(reg, 0);
 
                         self.b.label(done);
-                        self.b.str(Reg::R0, destination.address);
+                        self.b.str(reg, destination.address);
+
+                        self.release_reg(reg);
                     }
                 }
 
@@ -667,8 +734,12 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                     Expr::Reference(name) => {
                         if let Some(var) = self.get_localvar(name) {
-                            self.b.load_address(Reg::R0, var);
-                            self.b.str(Reg::R0, destination.address);
+                            let reg = self.reg();
+
+                            self.b.load_address(reg, var);
+                            self.b.str(reg, destination.address);
+
+                            self.release_reg(reg);
 
                             return Ok(());
                         }
@@ -748,13 +819,16 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 // Resolve the function pointer.
                 self.generate_expr(expr, temp_fn_ptr_var)?;
 
-                self.b.ldr(Reg::R0, temp_fn_ptr_var);
+                let reg = self.reg();
+                self.b.ldr(reg, temp_fn_ptr_var);
                 self.free_local(temp_fn_ptr_var);
 
                 self.b
                     .inline_comment("Manually set LR (TODO: shouldn't this be +4??)");
                 self.b.mov(Reg::LinkReg, Reg::ProgCounter);
-                self.b.ldr(Reg::ProgCounter, Reg::R0 + 0);
+                self.b.ldr(Reg::ProgCounter, Address::at(reg));
+
+                self.release_reg(reg);
             }
         };
 
@@ -767,7 +841,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         };
 
         if self.generator.sizeof_ctype(sig.returns) <= WORD_SIZE {
+            // Expecting callee to place the result in R0.
             self.b.str(Reg::R0, destination.address);
+
             self.b.footer(format!(
                 "=== END Call {1} => R0 => {} ===",
                 self.b.format_address(&destination.address),
@@ -841,29 +917,40 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(());
                 };
 
-                self.b.ldr(Reg::R0, left_temp);
-                self.b.ldr(Reg::R1, right_temp);
+                let lhs_reg = self.reg();
+                let rhs_reg = self.reg();
+
+                self.b.ldr(lhs_reg, left_temp);
+                self.b.ldr(rhs_reg, right_temp);
+
                 self.free_local(left_temp);
                 self.free_local(right_temp);
 
                 let is_false = self.b.create_label("LogicEqual__isFalse");
                 let done = self.b.create_label("LogicEqual__done");
 
-                self.b.cmp(Reg::R0, Reg::R1);
+                self.b.cmp(lhs_reg, rhs_reg);
+
+                self.release_reg(lhs_reg);
+                self.release_reg(rhs_reg);
 
                 match mode {
                     CompareMode::Equal => self.b.bne(is_false),
                     CompareMode::NotEqual => self.b.beq(is_false),
                 };
 
-                self.b.mov(Reg::R0, 1);
+                let truthiness_reg = self.reg();
+
+                self.b.mov(truthiness_reg, 1);
                 self.b.b(done);
 
                 self.b.label(is_false);
-                self.b.mov(Reg::R0, 0);
+                self.b.mov(truthiness_reg, 0);
 
                 self.b.label(done);
-                self.b.str(Reg::R0, destination.address);
+                self.b.str(truthiness_reg, destination.address);
+
+                self.release_reg(truthiness_reg);
             }
 
             BinaryOp::Plus | BinaryOp::Minus => {
@@ -881,19 +968,24 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 self.generate_expr(left, left_temp)?;
                 self.generate_expr(right, right_temp)?;
-                self.b.ldr(Reg::R0, left_temp);
-                self.b.ldr(Reg::R1, right_temp);
+
+                let [left_reg, right_reg] = self.regs();
+
+                self.b.ldr(left_reg, left_temp);
+                self.b.ldr(right_reg, right_temp);
 
                 self.free_local(left_temp);
                 self.free_local(right_temp);
 
                 match op {
-                    BinaryOp::Plus => self.b.add(Reg::R0, Reg::R0, Reg::R1),
-                    BinaryOp::Minus => self.b.sub(Reg::R0, Reg::R0, Reg::R1),
+                    BinaryOp::Plus => self.b.add(left_reg, left_reg, right_reg),
+                    BinaryOp::Minus => self.b.sub(left_reg, left_reg, right_reg),
                     _ => unreachable!(),
                 };
 
-                self.b.str(Reg::R0, destination.address);
+                self.release_reg(right_reg);
+                self.b.str(left_reg, destination.address);
+                self.release_reg(left_reg);
 
                 self.b
                     .footer(format!("=== END binop({left} {opname} {right}) ==="));
@@ -923,58 +1015,74 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 let result_size = self.generator.sizeof_ctype(destination.ctype);
 
-                self.b.ldr(Reg::R0, temp_ptr_storage);
-                self.b.ldr(Reg::R1, temp_index_storage);
+                let ele_pointer = self.reg();
+                let ele_index = self.reg();
+
+                self.b.ldr(ele_pointer, temp_ptr_storage);
+                self.b.ldr(ele_index, temp_index_storage);
+
+                self.b.header("freeing index & ptr");
+                self.free_local(temp_index_storage);
+                self.free_local(temp_ptr_storage);
 
                 match element_size {
                     1 => {
-                        self.b.ldrb(Reg::R0, Reg::R0 + Reg::R1);
+                        self.b.ldrb(ele_pointer, ele_pointer + ele_index);
 
                         if result_size == 1 {
-                            self.b.strb(Reg::R0, destination.address);
+                            self.b.strb(ele_pointer, destination.address);
                         } else {
-                            self.b.str(Reg::R0, destination.address);
+                            self.b.str(ele_pointer, destination.address);
                         }
                     }
 
                     2 => {
                         // FIXME: I'm probably doing this big-endian by accident!!
-                        self.b.shl(Reg::R2, Reg::R1, 1);
-                        self.b.add(Reg::R2, Reg::R0, Reg::R2);
-                        self.b.ldrb(Reg::R0, Reg::R2 + 0);
-                        self.b.ldrb(Reg::R1, Reg::R2 + 1);
-                        self.b.shl(Reg::R0, Reg::R0, 8);
-                        self.b.or(Reg::R0, Reg::R0, Reg::R1);
-                        self.b.str(Reg::R0, destination.address);
+                        let temp = self.reg();
+
+                        self.b.shl(temp, ele_index, 1);
+                        self.b.add(temp, ele_pointer, temp);
+                        self.b.ldrb(ele_pointer, temp + 0);
+                        self.b.ldrb(ele_index, temp + 1);
+
+                        self.release_reg(temp);
+
+                        self.b.shl(ele_pointer, ele_pointer, 8);
+                        self.b.or(ele_pointer, ele_pointer, ele_index);
+                        self.b.str(ele_pointer, destination.address);
                     }
 
                     3 => {
                         // FIXME: I'm probably doing this big-endian by accident!!
-                        self.b.shl(Reg::R2, Reg::R1, 1);
-                        self.b.add(Reg::R2, Reg::R2, Reg::R1);
-                        self.b.add(Reg::R2, Reg::R0, Reg::R2);
-                        self.b.ldrb(Reg::R0, Reg::R2 + 0);
-                        self.b.ldrb(Reg::R1, Reg::R2 + 1);
-                        self.b.shl(Reg::R0, Reg::R0, 8);
-                        self.b.or(Reg::R0, Reg::R0, Reg::R1);
-                        self.b.ldrb(Reg::R1, Reg::R2 + 2);
-                        self.b.shl(Reg::R0, Reg::R0, 8);
-                        self.b.or(Reg::R0, Reg::R0, Reg::R1);
-                        self.b.str(Reg::R0, destination.address);
+                        let temp = self.reg();
+
+                        self.b.shl(temp, ele_index, 1);
+                        self.b.add(temp, temp, ele_index);
+                        self.b.add(temp, ele_pointer, temp);
+                        self.b.ldrb(ele_pointer, temp + 0);
+                        self.b.ldrb(ele_index, temp + 1);
+                        self.b.shl(ele_pointer, ele_pointer, 8);
+                        self.b.or(ele_pointer, ele_pointer, ele_index);
+                        self.b.ldrb(ele_index, temp + 2);
+
+                        self.release_reg(temp);
+
+                        self.b.shl(ele_pointer, ele_pointer, 8);
+                        self.b.or(ele_pointer, ele_pointer, ele_index);
+                        self.b.str(ele_pointer, destination.address);
                     }
 
                     4 => {
-                        self.b.shl(Reg::R1, Reg::R1, 2);
-                        self.b.ldr(Reg::R0, Reg::R0 + Reg::R1);
-                        self.b.str(Reg::R0, destination.address);
+                        self.b.shl(ele_index, ele_index, 2);
+                        self.b.ldr(ele_pointer, ele_pointer + ele_index);
+                        self.b.str(ele_pointer, destination.address);
                     }
 
                     _ => todo!("{element_ctype:?} ({element_size} bytes) can't fit in a register"),
                 }
 
-                self.b.header("freeing index & ptr");
-                self.free_local(temp_index_storage);
-                self.free_local(temp_ptr_storage);
+                self.release_reg(ele_pointer);
+                self.release_reg(ele_index);
             }
             BinaryOp::BitwiseLeftShift => todo!(),
             BinaryOp::BitwiseRightShift => todo!(),
@@ -994,15 +1102,20 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(());
                 }
 
-                self.b.ldr(Reg::R0, left_temp);
-                self.b.ldr(Reg::R1, right_temp);
+                let [left_reg, right_reg] = self.regs();
+
+                self.b.ldr(left_reg, left_temp);
+                self.b.ldr(right_reg, right_temp);
+
                 self.free_local(left_temp);
                 self.free_local(right_temp);
 
                 let upon_true = self.b.create_label("LogicOrdering__uponTrue");
                 let done = self.b.create_label("LogicOrdering__done");
 
-                self.b.cmp(Reg::R0, Reg::R1);
+                self.b.cmp(left_reg, right_reg);
+
+                self.release_reg([left_reg, right_reg]);
 
                 match mode {
                     OrderMode::LessThan => self.b.blt(upon_true),
@@ -1010,14 +1123,18 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     _ => todo!(),
                 };
 
-                self.b.mov(Reg::R0, 0);
+                let condition_reg = self.reg();
+
+                self.b.mov(condition_reg, 0);
                 self.b.b(done);
 
                 self.b.label(upon_true);
-                self.b.mov(Reg::R0, 1);
+                self.b.mov(condition_reg, 1);
 
                 self.b.label(done);
-                self.b.str(Reg::R0, destination.address);
+                self.b.str(condition_reg, destination.address);
+
+                self.release_reg(condition_reg);
             }
 
             BinaryOp::BitwiseXor => todo!(),
@@ -1038,8 +1155,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.generate_expr(left, condition_storage)?;
 
                 self.b.header("Test if LHS is truthy");
-                self.b.ldr(Reg::R0, condition_storage);
-                self.b.cmp(Reg::R0, 0);
+
+                let condition_reg = self.reg();
+
+                self.b.ldr(condition_reg, condition_storage);
+                self.b.cmp(condition_reg, 0);
+
+                self.release_reg(condition_reg);
 
                 if is_and {
                     self.b.beq(done_label);
@@ -1061,8 +1183,12 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         )
                     }
 
-                    self.b.ldr(Reg::R0, condition_storage);
-                    self.b.str(Reg::R0, destination.address);
+                    let condition_reg = self.reg();
+
+                    self.b.ldr(condition_reg, condition_storage);
+                    self.b.str(condition_reg, destination.address);
+
+                    self.release_reg(condition_reg);
                 }
 
                 self.free_local(condition_storage);

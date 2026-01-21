@@ -66,6 +66,12 @@ impl<const N: usize> From<[Reg; N]> for OneOrMoreRegisters {
     }
 }
 
+impl From<Reg> for [Reg; 1] {
+    fn from(value: Reg) -> Self {
+        [value]
+    }
+}
+
 impl From<Reg> for OneOrMoreRegisters {
     fn from(value: Reg) -> Self {
         OneOrMoreRegisters::One(value)
@@ -256,7 +262,7 @@ pub(super) enum RegOrImmediate {
     StringId(StringId),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) enum Reg {
     R0,
     R1,
