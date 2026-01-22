@@ -260,7 +260,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     .args
                     .iter()
                     .map(|arg| Self::align(self.generator.sizeof_ctype(arg.ctype)))
-                    .sum::<u32>() as i32,
+                    .sum::<u32>(),
             );
         }
 
