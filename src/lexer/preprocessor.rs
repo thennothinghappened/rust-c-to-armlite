@@ -7,8 +7,9 @@ impl<'a> Lexer<'a> {
         match self.take_chars_while(is_valid_identifier) {
             "pragma" => self.pragma_directive(),
             "include" => self.include_directive(),
-            "ifndef" => self.if_directive(true),
-            "ifdef" => self.if_directive(false),
+            "ifdef" => self.ifdef_directive(true),
+            "ifndef" => self.ifdef_directive(false),
+            "else" | "elifdef" | "elifndef" => self.else_directive(),
             "endif" => self.endif_directive(),
             "define" => self.define_directive(),
             "error" => self.error_directive(),
@@ -74,43 +75,28 @@ impl<'a> Lexer<'a> {
         TokenKind::DiscardMarker
     }
 
-    fn if_directive(&mut self, is_if_not_def: bool) -> TokenKind {
+    fn ifdef_directive(&mut self, wants_defined: bool) -> TokenKind {
         self.skip_whitespace();
         let definition_name = self.take_chars_while(is_valid_identifier);
 
-        if self.context.preproc_get(definition_name).is_none() == is_if_not_def {
+        if self.macro_is_defined(definition_name) == wants_defined {
+            // The condition succeeded, we should lex the enclosed tokens.
             self.if_stack_depth += 1;
-        } else {
-            // FIXME: this is a very bad way of doing this because strings n stuff could cause
-            // issues. lets pretend those don't exist for now :P
-            let mut if_stack_depth = 1;
-
-            while if_stack_depth > 0 {
-                self.take_chars_until(|char| char == '#');
-
-                if self.next_char().is_none() {
-                    break;
-                }
-
-                let directive = self.take_chars_while(is_valid_identifier);
-
-                match directive {
-                    "if" | "ifdef" | "ifndef" => {
-                        if_stack_depth += 1;
-                    }
-
-                    "endif" => {
-                        if_stack_depth -= 1;
-                    }
-
-                    _ => (),
-                }
-
-                self.take_chars_until(is_newline);
-            }
+            return TokenKind::DiscardMarker;
         }
 
-        TokenKind::DiscardMarker
+        self.skip_false_conditional()
+    }
+
+    fn else_directive(&mut self) -> TokenKind {
+        // If we're seeing an `#else`, that means the current `#if` was true, so whatever we're
+        // about to read should be discarded until we reach the `#endif`.
+
+        if self.if_stack_depth == 0 {
+            todo!("handle unbalanced #if/#endif stack")
+        }
+
+        self.skip_false_conditional()
     }
 
     fn endif_directive(&mut self) -> TokenKind {
@@ -119,6 +105,44 @@ impl<'a> Lexer<'a> {
         }
 
         self.if_stack_depth -= 1;
+
+        TokenKind::DiscardMarker
+    }
+
+    /// The preprocessor condition failed, let's speed through whatever comes next and find our
+    /// relevant `#else` block (if it exists), otherwise our `#endif`.
+    fn skip_false_conditional(&mut self) -> TokenKind {
+        // FIXME: this is a very bad way of doing this because strings n stuff could cause
+        // issues. lets pretend those don't exist for now :P
+        let mut if_stack_depth = 1;
+
+        while if_stack_depth > 0 {
+            self.take_chars_until(|char| char == '#');
+
+            if self.next_char().is_none() {
+                // Reached EOF without closing, that's okay.
+                break;
+            }
+
+            match self.take_chars_while(is_valid_identifier) {
+                "if" | "ifdef" | "ifndef" => if_stack_depth += 1,
+
+                "endif" => if_stack_depth -= 1,
+
+                "elifdef" if if_stack_depth == 1 => return self.ifdef_directive(true),
+
+                "elifndef" if if_stack_depth == 1 => return self.ifdef_directive(false),
+
+                "else" if if_stack_depth == 1 => {
+                    self.if_stack_depth += 1;
+                    if_stack_depth -= 1;
+                }
+
+                _ => (),
+            }
+
+            self.take_chars_until(is_newline);
+        }
 
         TokenKind::DiscardMarker
     }
@@ -142,5 +166,9 @@ impl<'a> Lexer<'a> {
         let message = self.take_chars_until(is_newline);
 
         TokenKind::ErrorPreprocessorDirective(self.context.allocate_ident(message))
+    }
+
+    fn macro_is_defined(&self, name: &str) -> bool {
+        self.context.preproc_get(name).is_some()
     }
 }
