@@ -19,6 +19,7 @@ use crate::{
 };
 
 pub mod charreading;
+mod preprocessor;
 pub mod tokenkind;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -178,107 +179,7 @@ impl<'a> Lexer<'a> {
         }
 
         if self.accept_char('#') {
-            // Preprocessor directive!
-            let directive = self.take_chars_while(is_valid_identifier);
-
-            match directive {
-                "pragma" => {
-                    self.skip_whitespace();
-
-                    let content = self.take_chars_until(is_newline).trim();
-
-                    match content {
-                        "once" => self.context.source_enable_pragma_once(self.source_id),
-                        _ => println!("Unrecognised #pragma `{content}`"),
-                    }
-                }
-
-                "include" => {
-                    // We'll make a temporary lil lexer to deal with the new file, then brutally
-                    // murder it once it does its job (drop)
-                    self.skip_whitespace();
-
-                    if !self.accept_char('"') {
-                        todo!(
-                            "Recover from syntax error in #include directive: missing opening \""
-                        );
-                    }
-
-                    let path = self.take_chars_until(|char| char == '"' || is_newline(char));
-
-                    if !self.accept_char('"') {
-                        todo!(
-                            "Recover from syntax error in #include directive: missing closing \""
-                        );
-                    }
-
-                    let source_id = match self.context.add_source_file_path(path.to_owned()) {
-                        Ok(id) => id,
-                        Err(_) => {
-                            return TokenKind::IncludeFileNotFound(
-                                self.context.allocate_ident(path),
-                            )
-                        }
-                    };
-
-                    if self.context.allow_reading(source_id) {
-                        let mut temp_lexer = Lexer::new(self.context.clone(), source_id);
-
-                        loop {
-                            let token = temp_lexer.next();
-
-                            if token.kind == TokenKind::Eof {
-                                break;
-                            }
-
-                            self.token_buffer_stream.push_back(token);
-                        }
-                    }
-                }
-
-                "ifndef" => self.ifdef(true),
-                "ifdef" => self.ifdef(false),
-
-                "endif" => {
-                    if self.if_stack_depth == 0 {
-                        todo!("handle unbalanced #if/#endif stack")
-                    }
-
-                    self.if_stack_depth -= 1;
-                }
-
-                "define" => {
-                    self.skip_whitespace();
-                    let definition_name = self.take_chars_while(is_valid_identifier);
-                    self.skip_whitespace();
-
-                    if !self.accept_newline() {
-                        todo!("#define with value!");
-                    }
-
-                    self.context.preproc_define(definition_name, "");
-                }
-
-                "error" => {
-                    self.skip_whitespace();
-                    let message = self.take_chars_until(is_newline);
-
-                    return TokenKind::ErrorPreprocessorDirective(
-                        self.context.allocate_ident(message),
-                    );
-                }
-
-                directive => {
-                    // Eat the rest of the line so we can continue.
-                    self.take_chars_until(is_newline);
-
-                    return TokenKind::UnknownPreprocessorDirective(
-                        self.context.allocate_ident(directive),
-                    );
-                }
-            }
-
-            return TokenKind::DiscardMarker;
+            return self.preprocessor_directive();
         }
 
         if self.accept_char('+') {
@@ -402,43 +303,6 @@ impl<'a> Lexer<'a> {
 
         self.next_char();
         TokenKind::Unknown(char)
-    }
-
-    fn ifdef(&mut self, is_if_not_def: bool) {
-        self.skip_whitespace();
-        let definition_name = self.take_chars_while(is_valid_identifier);
-
-        if self.context.preproc_get(definition_name).is_none() == is_if_not_def {
-            self.if_stack_depth += 1;
-        } else {
-            // FIXME: this is a very bad way of doing this because strings n stuff could cause
-            // issues. lets pretend those don't exist for now :P
-            let mut if_stack_depth = 1;
-
-            while if_stack_depth > 0 {
-                self.take_chars_until(|char| char == '#');
-
-                if self.next_char().is_none() {
-                    break;
-                }
-
-                let directive = self.take_chars_while(is_valid_identifier);
-
-                match directive {
-                    "if" | "ifdef" | "ifndef" => {
-                        if_stack_depth += 1;
-                    }
-
-                    "endif" => {
-                        if_stack_depth -= 1;
-                    }
-
-                    _ => (),
-                }
-
-                self.take_chars_until(is_newline);
-            }
-        }
     }
 
     fn maybe_map_next_char<F, R>(&mut self, map: F) -> Option<R>
