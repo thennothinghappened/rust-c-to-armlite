@@ -298,6 +298,14 @@ impl<'a> Lexer<'a> {
                 return token;
             }
 
+            if let Some(tokens) = self.context.get_macro(str) {
+                for &token in tokens.iter() {
+                    self.token_buffer_stream.push_back(token);
+                }
+
+                return TokenKind::DiscardMarker;
+            }
+
             return TokenKind::Ident(self.context.allocate_ident(str));
         }
 

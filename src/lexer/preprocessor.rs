@@ -150,13 +150,19 @@ impl<'a> Lexer<'a> {
     fn define_directive(&mut self) -> TokenKind {
         self.skip_whitespace();
         let definition_name = self.take_chars_while(is_valid_identifier);
-        self.skip_whitespace();
 
-        if !self.accept_newline() {
-            todo!("#define with value!");
+        if self.accept_char('(') {
+            todo!("Parameterised #define");
         }
 
-        self.context.preproc_define(definition_name, "");
+        self.skip_whitespace();
+        let mut content = vec![];
+
+        while self.peek_char().is_some() && !self.accept_newline() {
+            content.push(self.next());
+        }
+
+        self.context.define_macro(definition_name, content);
 
         TokenKind::DiscardMarker
     }
@@ -169,6 +175,6 @@ impl<'a> Lexer<'a> {
     }
 
     fn macro_is_defined(&self, name: &str) -> bool {
-        self.context.preproc_get(name).is_some()
+        self.context.get_macro(name).is_some()
     }
 }

@@ -150,13 +150,11 @@ impl<'a> Context<'a> {
         (*self.idents.borrow()[id]).clone()
     }
 
-    pub(crate) fn preproc_define(&self, name: impl Into<String>, value: impl Into<String>) {
-        self.macros
-            .borrow_mut()
-            .insert(name.into(), Rc::new(value.into()));
+    pub(crate) fn define_macro(&self, name: impl Into<String>, value: Vec<Token>) {
+        self.macros.borrow_mut().insert(name.into(), Rc::new(value));
     }
 
-    pub(crate) fn preproc_get(&self, name: &str) -> Option<Rc<String>> {
+    pub(crate) fn get_macro(&self, name: &str) -> Option<Rc<Vec<Token>>> {
         self.macros.borrow().get(name).cloned()
     }
 }
