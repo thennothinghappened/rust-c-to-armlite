@@ -468,6 +468,7 @@ impl<'a> Parser<'a> {
             TokenKind::SizeOf => Some(UnaryOp::SizeOf),
             TokenKind::BooleanNot => Some(UnaryOp::BooleanNot),
             TokenKind::Ampersand => Some(UnaryOp::AddressOf),
+            TokenKind::Star => Some(UnaryOp::Dereference),
             _ => None,
         }) else {
             return self.parse_postfix_expr();
