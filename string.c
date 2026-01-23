@@ -33,6 +33,8 @@ size_t strnlen_s(char* buffer, size_t bufferLength)
 	return index;
 }
 
+#ifdef __armlitec__
+
 [[armlite_c::raw_assembly]]
 void memcpy(void *destination, void *source, size_t count)
 {
@@ -58,3 +60,5 @@ __asm__("Lloop__memcpy:");
 __asm__("Ldone__memcpy:");
 	__asm__("MOV PC, LR");
 }
+
+#endif
