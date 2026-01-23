@@ -43,6 +43,9 @@ impl<'a> Context<'a> {
             ..Default::default()
         };
 
+        // Identify this compiler.
+        this.preproc_define("__armlitec__", "1");
+
         match asm_mode {
             AsmMode::ArmLite => this.preproc_define("__armlite__", "1"),
             AsmMode::ArmV7 => this.preproc_define("__arm__", "1"),
