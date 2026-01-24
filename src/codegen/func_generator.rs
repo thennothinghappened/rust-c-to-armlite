@@ -1,6 +1,7 @@
 use std::{
+    cmp::Ordering,
     collections::{HashMap, HashSet, VecDeque},
-    ops::{Not, Shl, Shr},
+    ops::{Add, Not, Shl, Shr},
 };
 
 use anyhow::{bail, Context};
@@ -9,9 +10,9 @@ use itertools::Itertools;
 
 use crate::{
     codegen::{
-        arm::{LiteralIndexAddress, OneOrMoreRegisters},
+        arm::{address::Address, location::Location},
         func_builder::{FuncBuilder, LabelId},
-        Address, Generator, Reg, RegOrImmediate, WORD_SIZE,
+        Generator, Reg, WORD_SIZE,
     },
     parser::program::{
         expr::{call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
@@ -233,7 +234,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         }
 
         self.b.push([Reg::R11, Reg::LinkReg]);
-        self.b.mov(Reg::R11, Reg::Sp);
+        self.b.move_dword(Reg::R11, Reg::Sp);
 
         self.generate_block(block)?;
 
@@ -247,7 +248,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         }
 
         self.b.label(self.done_label);
-        self.b.mov(Reg::Sp, Reg::R11);
+        self.b.move_dword(Reg::Sp, Reg::R11);
         self.b.pop([Reg::R11, Reg::LinkReg]);
 
         if !self.b.sig.args.is_empty() {
@@ -284,37 +285,39 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 if let Some(expr) = &variable.value {
                     // eval the initial val.
-                    self.generate_expr(expr, var)?;
+                    self.get_rvalue(expr, var)?;
                 }
             }
 
-            Statement::Expr(expr) => self.generate_expr(expr, NOWHERE)?,
+            Statement::Expr(expr) => self.get_rvalue(expr, NOWHERE)?,
 
             Statement::Return(expr) => {
                 let temp_storage = self.allocate_anon(self.b.sig.returns);
 
                 self.b.header("<return>");
 
-                self.generate_expr(expr, temp_storage)?;
+                self.get_rvalue(expr, temp_storage)?;
 
                 if self.generator.sizeof_ctype(temp_storage.ctype) > WORD_SIZE {
                     // the caller pushes an address where they want us to copy the returned
                     // (presumably) struct to to return it to them, rather than splitting it
                     // across registers or something.
-                    let address_holder = self.reg();
-                    let value_holder = self.reg();
+                    let [address_holder, value_holder] = self.regs();
 
                     self.b.inline_comment("Grab the return storage address.");
-                    self.b.ldr(address_holder, stack_offset(4));
-                    self.b.ldr(value_holder, temp_storage);
-                    self.b.str(value_holder, Address::at(address_holder));
+                    self.b.load_dword(address_holder, stack_offset(4));
 
-                    self.release_reg(value_holder);
-                    self.release_reg(address_holder);
+                    self.b
+                        .inline_comment("Put the returned value where requested.");
+                    self.b.load_dword(value_holder, temp_storage);
+                    self.b
+                        .store_dword(value_holder, Address::at(address_holder));
+
+                    self.release_reg([address_holder, value_holder]);
                 } else {
                     // we can neatly return the value in one register. yay!
                     self.b.inline_comment("Put the returned value in R0.");
-                    self.b.ldr(Reg::R0, temp_storage);
+                    self.b.load_dword(Reg::R0, temp_storage);
                 }
 
                 self.free_local(temp_storage);
@@ -357,11 +360,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.header(format!("## if ({condition})"));
 
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
-                self.generate_expr(condition, temp_condition_storage)?;
+                self.get_rvalue(condition, temp_condition_storage)?;
 
                 let condition_holder = self.reg();
 
-                self.b.ldr(condition_holder, temp_condition_storage);
+                self.b.load_dword(condition_holder, temp_condition_storage);
                 self.free_local(temp_condition_storage);
 
                 self.b.cmp(condition_holder, 0);
@@ -405,11 +408,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.breakable_stack.push_back(breakable);
 
                 self.b.label(loop_label);
-                self.generate_expr(condition, temp_condition_storage)?;
+                self.get_rvalue(condition, temp_condition_storage)?;
 
                 let condition_holder = self.reg();
 
-                self.b.ldr(condition_holder, temp_condition_storage);
+                self.b.load_dword(condition_holder, temp_condition_storage);
                 self.b.cmp(condition_holder, 0);
 
                 self.release_reg(condition_holder);
@@ -459,34 +462,37 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
     /// Generate instructions to perform the given operation, returning the instructions required to
     /// perform it, and place the output at `[R11-#result_offset]`.
-    fn generate_expr(
+    fn get_rvalue(
         &mut self,
         expr: &Expr,
         destination: impl Into<TypedLocation>,
     ) -> anyhow::Result<()> {
         let destination = destination.into();
 
+        println!(
+            "\nGenerating `{expr}`, used registers = {}",
+            self.b
+                .register_pool
+                .iter()
+                .filter_map(|(reg, status)| if status.available {
+                    None
+                } else {
+                    Some(format!("{reg}"))
+                })
+                .join(", ")
+        );
+
         self.b.header(format!("EVALUATE `{expr}`"));
 
         match expr {
             Expr::StringLiteral(value) => {
                 let string_id = self.generator.file_builder.create_string(value);
-                let string_address_holder = self.reg();
-
-                self.b.mov(string_address_holder, string_id);
-                self.b.str(string_address_holder, destination.address);
-
-                self.release_reg(string_address_holder);
+                self.b.copy_dword(string_id, destination.location);
             }
 
             Expr::IntLiteral(value) => {
                 // ints are nice and relaxed :)
-                let int_holder = self.reg();
-
-                self.b.mov(int_holder, *value);
-                self.b.str(int_holder, destination.address);
-
-                self.release_reg(int_holder);
+                self.b.copy_dword(*value, destination.location);
             }
 
             Expr::Reference(name) => {
@@ -497,36 +503,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         self.generator.program.format_ctype(destination.ctype)
                     ));
 
-                    match (source.ctype, destination.ctype) {
-                        (CType::AsIs(_), CType::AsIs(_))
-                        | (CType::PointerTo(_), CType::PointerTo(_)) => {
-                            let value_holder = self.reg();
-
-                            self.b.ldr(value_holder, source);
-                            self.b.str(value_holder, destination.address);
-
-                            self.release_reg(value_holder);
-                        }
-
-                        (CType::ArrayOf(_, _), CType::ArrayOf(_, _)) => {
-                            todo!("array copying!");
-                        }
-
-                        (CType::ArrayOf(_, _), CType::PointerTo(_)) => {
-                            let address_holder = self.reg();
-
-                            self.b.load_address(address_holder, source);
-                            self.b.str(address_holder, destination.address);
-
-                            self.release_reg(address_holder);
-                        }
-
-                        _ => bail!(
-                            "Can't cast type `{}` to `{}`",
-                            self.generator.program.format_ctype(source.ctype),
-                            self.generator.program.format_ctype(destination.ctype)
-                        ),
-                    }
+                    self.copy_lvalue(source, destination)?;
 
                     self.b.footer(format!("=== done query `{name}` ==="));
                     return Ok(());
@@ -541,7 +518,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         let reg = self.reg();
 
                         self.b.asm(format!("MOV {reg}, fn_{name}"));
-                        self.b.str(reg, destination.address);
+                        self.b.copy_dword(reg, destination.location);
 
                         self.release_reg(reg);
                     }
@@ -557,49 +534,27 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                                 let reg = self.reg();
 
                                 self.b.asm(format!("MOV {reg}, var_{name}"));
-                                self.b.ldr(reg, reg + 0);
-                                self.b.str(reg, destination.address);
+                                self.b.copy_dword(Address::at(reg), destination.location);
 
                                 self.release_reg(reg);
                             }
 
-                            CType::PointerTo(ctype_id) => match destination.ctype {
+                            CType::PointerTo(ctype_id, source_size) => match destination.ctype {
                                 CType::AsIs(cconcrete_type) => {
-                                    panic!("can't cast a pointer to a value type")
+                                    bail!("can't cast a pointer to a value type")
                                 }
 
-                                CType::PointerTo(ctype_id) => {
+                                CType::PointerTo(ctype_id, None) => {
                                     let reg = self.reg();
 
                                     self.b.asm(format!("MOV {reg}, var_{name}"));
-                                    self.b.ldr(reg, reg + 0);
-                                    self.b.str(reg, destination.address);
+                                    self.b.copy_dword(Address::at(reg), destination.location);
 
                                     self.release_reg(reg);
                                 }
 
-                                CType::ArrayOf(ctype_id, size) => {
+                                CType::PointerTo(ctype_id, Some(_)) => {
                                     todo!("load array from pointer")
-                                }
-                            },
-
-                            CType::ArrayOf(ctype_id, _) => match destination.ctype {
-                                CType::AsIs(cconcrete_type) => {
-                                    panic!("can't cast an array to a value type")
-                                }
-
-                                CType::PointerTo(ctype_id) => {
-                                    let reg = self.reg();
-
-                                    self.b.asm(format!("MOV {reg}, var_{name}"));
-                                    self.b.ldr(reg, reg + 0);
-                                    self.b.str(reg, destination.address);
-
-                                    self.release_reg(reg);
-                                }
-
-                                CType::ArrayOf(ctype_id, _) => {
-                                    todo!("array copying!")
                                 }
                             },
                         }
@@ -624,84 +579,56 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                     match destination.ctype {
                         CType::AsIs(cconcrete_type) => match cconcrete_type {
+                            CConcreteType::Void => (),
+
                             CConcreteType::Struct(_) => {
                                 bail!("A struct is not a valid assignment target for a number")
                             }
+
                             CConcreteType::Func(_) => {
                                 bail!("A function pointer is not a valid assignment target for a number")
                             }
+
                             CConcreteType::Enum(_) => todo!(),
 
                             CConcreteType::Primitive(primitive) => match primitive {
-                                CPrimitive::Void => (),
-
-                                CPrimitive::Bool | CPrimitive::Char | CPrimitive::UnsignedChar => {
-                                    let reg = self.reg();
-
-                                    self.b.mov(reg, size & 0xff);
-                                    self.b.strb(reg, destination.address);
-
-                                    self.release_reg(reg);
+                                CPrimitive::Bool | CPrimitive::UnsignedChar => {
+                                    self.b.copy_byte(size, destination.location);
                                 }
 
-                                CPrimitive::SignedChar => {
-                                    let reg = self.reg();
-
-                                    self.b.mov(reg, size & 0x7f);
-                                    self.b.strb(reg, destination.address);
-
-                                    self.release_reg(reg);
+                                CPrimitive::Char | CPrimitive::SignedChar => {
+                                    self.b.copy_byte(size & 0x7f, destination.location);
                                 }
 
                                 CPrimitive::Short | CPrimitive::UnsignedShort => {
-                                    let reg = self.reg();
-
-                                    self.b.ldr(reg, destination.address);
-                                    self.b.shr(reg, reg, 16);
-                                    self.b.shl(reg, reg, 16);
-                                    self.b.or(reg, reg, size & 0xffff);
-                                    self.b.str(reg, destination.address);
-
-                                    self.release_reg(reg);
+                                    self.b.copy_word(size, destination.location);
                                 }
 
                                 CPrimitive::Int
                                 | CPrimitive::UnsignedInt
                                 | CPrimitive::Long
                                 | CPrimitive::UnsignedLong => {
-                                    let reg = self.reg();
-
-                                    self.b.mov(reg, size);
-                                    self.b.str(reg, destination.address);
-
-                                    self.release_reg(reg);
+                                    self.b.copy_dword(size, destination.location);
                                 }
 
-                                CPrimitive::LongLong | CPrimitive::UnsignedLongLong => {}
+                                CPrimitive::LongLong | CPrimitive::UnsignedLongLong => {
+                                    self.b.copy_qword(size, destination.location);
+                                }
 
                                 CPrimitive::Float | CPrimitive::Double | CPrimitive::LongDouble => {
-                                    let reg = self.reg();
-
-                                    self.b.mov(reg, size as f32);
-                                    self.b.str(reg, destination.address);
-
-                                    self.release_reg(reg);
+                                    self.b.copy_dword(size as f32, destination.location);
                                 }
                             },
                         },
 
-                        CType::PointerTo(_) => {
+                        CType::PointerTo(_, _) => {
                             todo!("A pointer is not a valid assignment target for a number")
-                        }
-
-                        CType::ArrayOf(_, _) => {
-                            bail!("An array is not a valid assignment target for a number")
                         }
                     }
                 }
 
                 UnaryOp::BooleanNot => {
-                    self.generate_expr(expr, destination)?;
+                    self.get_rvalue(expr, destination)?;
 
                     if destination.is_somewhere() {
                         let upon_truthy_input = self.b.create_label("BooleanNot__uponTruthyInput");
@@ -709,35 +636,38 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                         let reg = self.reg();
 
-                        self.b.ldr(reg, destination.address);
+                        self.b.copy_dword(destination.location, reg);
                         self.b.cmp(reg, 0);
                         self.b.bne(upon_truthy_input);
 
-                        self.b.mov(reg, 1);
+                        self.b.move_dword(reg, 1);
                         self.b.b(done);
 
                         self.b.label(upon_truthy_input);
-                        self.b.mov(reg, 0);
+                        self.b.move_dword(reg, 0);
 
                         self.b.label(done);
-                        self.b.str(reg, destination.address);
+                        self.b.copy_dword(reg, destination.location);
 
                         self.release_reg(reg);
                     }
                 }
 
-                UnaryOp::Negative => todo!(),
+                UnaryOp::Negative => {
+                    // let working_type = self
+                    //     .generator
+                    //     .common_real_primitive(destination.ctype, self.type_of_expr(expr)?);
+
+                    todo!()
+                }
 
                 UnaryOp::AddressOf => match &**expr {
-                    Expr::StringLiteral(_) => todo!(),
-                    Expr::IntLiteral(_) => todo!(),
-
                     Expr::Reference(name) => {
                         if let Some(var) = self.get_localvar(name) {
                             let reg = self.reg();
 
-                            self.b.load_address(reg, var);
-                            self.b.str(reg, destination.address);
+                            self.b.load_address(reg, var, 0);
+                            self.b.copy_dword(reg, destination.location);
 
                             self.release_reg(reg);
 
@@ -747,16 +677,151 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         todo!()
                     }
 
-                    Expr::Call(call) => todo!(),
-                    Expr::BinaryOp(binary_op, expr, expr1) => todo!(),
                     Expr::UnaryOp(unary_op, expr) => todo!(),
-                    Expr::Cast(expr, ctype) => todo!(),
+                    expr => bail!("Cannot take the address of non-lvalue `{expr}`"),
                 },
 
-                UnaryOp::Dereference => todo!(),
+                UnaryOp::Dereference => {
+                    let CType::PointerTo(inner_id, _) = self.type_of_expr(expr)? else {
+                        bail!("Cannot dereference a non-pointer value");
+                    };
+
+                    let source_ctype = self.generator.program.get_ctype(inner_id);
+
+                    let source_address_temp = self.allocate_anon(CType::pointer_to(inner_id));
+                    self.get_rvalue(expr, source_address_temp)?;
+
+                    let source_address_reg = self.reg();
+                    self.b.load_dword(source_address_reg, source_address_temp);
+                    self.free_local(source_address_temp);
+
+                    self.copy_lvalue(
+                        TypedLocation::new(source_ctype, Address::at(source_address_reg)),
+                        destination,
+                    )?;
+
+                    self.release_reg(source_address_reg);
+                }
             },
 
             Expr::Cast(expr, _) => todo!(),
+        };
+
+        Ok(())
+    }
+
+    fn copy_lvalue(
+        &mut self,
+        source: impl Into<TypedLocation>,
+        destination: impl Into<TypedLocation>,
+    ) -> anyhow::Result<()> {
+        let source = source.into();
+        let destination = destination.into();
+
+        match (source.ctype, destination.ctype) {
+            (CType::AsIs(source_concrete), CType::AsIs(destination_concrete))
+                if source_concrete == destination_concrete =>
+            {
+                // Nice and easy!
+                self.b.header("Same type, directly copy the element.");
+
+                self.b.copy_bytes(
+                    source.location,
+                    destination.location,
+                    self.generator.sizeof_ctype(source.ctype),
+                );
+
+                return Ok(());
+            }
+
+            (
+                CType::AsIs(CConcreteType::Primitive(source_primitive)),
+                CType::AsIs(CConcreteType::Primitive(destination_primitive)),
+            ) => match (
+                source_primitive.is_integer_type(),
+                destination_primitive.is_integer_type(),
+            ) {
+                (true, true) => {
+                    let source_size = self.generator.sizeof_ctype(source_primitive);
+
+                    let destination_size = self.generator.sizeof_ctype(destination_primitive);
+
+                    match (source_size, destination_size) {
+                        (1, 1) | (2, 2) | (4, 4) | (8, 8) => {
+                            self.b.header("Casting away signed-ness, enjoy some UB!");
+                            self.b
+                                .copy_bytes(source.location, destination.location, source_size)
+                        }
+
+                        // LE layout means we can just grab whatever portion of the source and
+                        // stick it at the destination w/ padding zeros :)
+                        (1, 2) => {
+                            self.b.copy_word(0, destination.location);
+                            self.b.copy_byte(source.location, destination.location);
+                        }
+
+                        (1, 4) => {
+                            self.b.copy_dword(0, destination.location);
+                            self.b.copy_byte(source.location, destination.location);
+                        }
+
+                        (2, 4) => {
+                            self.b.copy_dword(0, destination.location);
+                            self.b.copy_word(source.location, destination.location);
+                        }
+
+                        _ => {
+                            self.b.header(format!("Casting to a smaller integer size ({source_primitive} to {destination_primitive})"));
+                            self.b.copy_bytes(
+                                source.location,
+                                destination.location,
+                                destination_size,
+                            )
+                        }
+                    }
+                }
+
+                (true, false) => todo!(),
+                (false, true) => todo!(),
+                (false, false) => todo!(),
+            },
+
+            (CType::PointerTo(_, None), CType::PointerTo(_, None)) => {
+                self.b.copy_dword(source.location, destination.location)
+            }
+
+            (CType::AsIs(_), CType::AsIs(_)) => {
+                // FIXME: Blindly reinterpreting the source type as the destination type, this will
+                // cause problems!!
+                self.b.copy_bytes(
+                    source.location,
+                    destination.location,
+                    self.generator.sizeof_ctype(destination.ctype),
+                );
+            }
+
+            (CType::PointerTo(_, _), CType::PointerTo(_, None)) => {
+                // Copy a pointer, or decay an array to a pointer to its first element.
+                let Location::Address(source_address) = source.location else {
+                    bail!(
+                        "Cannot get the address of the location {} which is not in memory",
+                        self.b.format_location(&source.location)
+                    );
+                };
+
+                let address_holder = self.reg();
+
+                self.b.load_address(address_holder, source_address, 0);
+                self.b.copy_dword(address_holder, destination.location);
+
+                self.release_reg(address_holder);
+            }
+
+            _ => bail!(
+                "No implicit conversion from type `{}` to `{}`",
+                self.generator.program.format_ctype(source.ctype),
+                self.generator.program.format_ctype(destination.ctype)
+            ),
         };
 
         Ok(())
@@ -802,7 +867,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         ));
 
         for (arg, out_info) in call_args.iter().zip(&arg_target_spots) {
-            self.generate_expr(arg, *out_info)?;
+            self.get_rvalue(arg, *out_info)?;
         }
 
         match call_target {
@@ -817,16 +882,16 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let temp_fn_ptr_var = self.allocate_anon(CType::AsIs(CConcreteType::Func(sig_id)));
 
                 // Resolve the function pointer.
-                self.generate_expr(expr, temp_fn_ptr_var)?;
+                self.get_rvalue(expr, temp_fn_ptr_var)?;
 
                 let reg = self.reg();
-                self.b.ldr(reg, temp_fn_ptr_var);
+                self.b.load_dword(reg, temp_fn_ptr_var);
                 self.free_local(temp_fn_ptr_var);
 
                 self.b
                     .inline_comment("Manually set LR (TODO: shouldn't this be +4??)");
-                self.b.mov(Reg::LinkReg, Reg::ProgCounter);
-                self.b.ldr(Reg::ProgCounter, Address::at(reg));
+                self.b.move_dword(Reg::LinkReg, Reg::ProgCounter);
+                self.b.load_dword(Reg::ProgCounter, Address::at(reg));
 
                 self.release_reg(reg);
             }
@@ -842,11 +907,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
         if self.generator.sizeof_ctype(sig.returns) <= WORD_SIZE {
             // Expecting callee to place the result in R0.
-            self.b.str(Reg::R0, destination.address);
+            self.b.copy_dword(Reg::R0, destination.location);
 
             self.b.footer(format!(
                 "=== END Call {1} => R0 => {} ===",
-                self.b.format_address(&destination.address),
+                self.b.format_location(&destination.location),
                 call_target
             ));
         } else {
@@ -865,8 +930,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     ) -> anyhow::Result<()> {
         match op {
             BinaryOp::AndThen => {
-                self.generate_expr(left, NOWHERE)?;
-                self.generate_expr(right, destination)?;
+                self.get_rvalue(left, NOWHERE)?;
+                self.get_rvalue(right, destination)?;
             }
             BinaryOp::Assign => match left {
                 Expr::StringLiteral(_) => bail!("A string is not an assignment target"),
@@ -875,7 +940,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 Expr::Reference(name) => {
                     if let Some(local) = self.get_localvar(name) {
-                        self.generate_expr(right, local)?;
+                        self.get_rvalue(right, local)?;
 
                         if destination.is_somewhere() {
                             todo!("assign-and-return")
@@ -904,53 +969,49 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             BinaryOp::MinusAssign => {}
 
             BinaryOp::LogicEqual(mode) => {
-                let left_ctype = self.type_of_expr(left)?;
-                let left_temp = self.allocate_anon(left_ctype);
-
-                let right_ctype = self.type_of_expr(right)?;
-                let right_temp = self.allocate_anon(right_ctype);
-
-                self.generate_expr(left, left_temp)?;
-                self.generate_expr(right, right_temp)?;
-
-                if destination.is_nowhere() {
-                    return Ok(());
-                };
-
-                let lhs_reg = self.reg();
-                let rhs_reg = self.reg();
-
-                self.b.ldr(lhs_reg, left_temp);
-                self.b.ldr(rhs_reg, right_temp);
-
-                self.free_local(left_temp);
-                self.free_local(right_temp);
-
                 let is_false = self.b.create_label("LogicEqual__isFalse");
                 let done = self.b.create_label("LogicEqual__done");
 
-                self.b.cmp(lhs_reg, rhs_reg);
+                let common_ctype = self
+                    .generator
+                    .common_ctype(&self.type_of_expr(left)?, &self.type_of_expr(right)?)?;
 
-                self.release_reg(lhs_reg);
-                self.release_reg(rhs_reg);
+                let common_ctype_size = self.generator.sizeof_ctype(common_ctype);
+                assert!(common_ctype_size >= WORD_SIZE);
 
-                match mode {
-                    CompareMode::Equal => self.b.bne(is_false),
-                    CompareMode::NotEqual => self.b.beq(is_false),
-                };
+                let left_temp = self.allocate_anon(common_ctype);
+                let right_temp = self.allocate_anon(common_ctype);
 
-                let truthiness_reg = self.reg();
+                self.get_rvalue(left, left_temp)?;
+                self.get_rvalue(right, right_temp)?;
 
-                self.b.mov(truthiness_reg, 1);
-                self.b.b(done);
+                if common_ctype_size == WORD_SIZE {
+                    let [left_reg, right_reg] = self.regs();
 
-                self.b.label(is_false);
-                self.b.mov(truthiness_reg, 0);
+                    self.b.load_dword(left_reg, left_temp);
+                    self.b.load_dword(right_reg, right_temp);
 
-                self.b.label(done);
-                self.b.str(truthiness_reg, destination.address);
+                    self.free_local(right_temp);
+                    self.free_local(left_temp);
 
-                self.release_reg(truthiness_reg);
+                    self.b.cmp(left_reg, right_reg);
+                    self.b.release_reg([left_reg, right_reg]);
+
+                    match mode {
+                        CompareMode::Equal => self.b.bne(is_false),
+                        CompareMode::NotEqual => self.b.beq(is_false),
+                    };
+
+                    self.b.copy_dword(1, destination.location);
+                    self.b.b(done);
+
+                    self.b.label(is_false);
+                    self.b.copy_dword(0, destination.location);
+
+                    self.b.label(done);
+                } else {
+                    todo!("Compare equality of values which can't fit in a register")
+                }
             }
 
             BinaryOp::Plus | BinaryOp::Minus => {
@@ -966,13 +1027,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let left_temp = self.allocate_anon(destination.ctype);
                 let right_temp = self.allocate_anon(destination.ctype);
 
-                self.generate_expr(left, left_temp)?;
-                self.generate_expr(right, right_temp)?;
+                self.get_rvalue(left, left_temp)?;
+                self.get_rvalue(right, right_temp)?;
 
                 let [left_reg, right_reg] = self.regs();
 
-                self.b.ldr(left_reg, left_temp);
-                self.b.ldr(right_reg, right_temp);
+                self.b.load_dword(left_reg, left_temp);
+                self.b.load_dword(right_reg, right_temp);
 
                 self.free_local(left_temp);
                 self.free_local(right_temp);
@@ -984,7 +1045,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 };
 
                 self.release_reg(right_reg);
-                self.b.str(left_reg, destination.address);
+                self.b.copy_dword(left_reg, destination.location);
                 self.release_reg(left_reg);
 
                 self.b
@@ -997,92 +1058,52 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(());
                 };
 
-                let (CType::ArrayOf(element_ctypeid, _) | CType::PointerTo(element_ctypeid)) =
-                    self.type_of_expr(left)?
-                else {
+                let CType::PointerTo(element_ctypeid, _) = self.type_of_expr(left)? else {
                     bail!("{left} has a non-indexable type");
                 };
 
                 let element_ctype = self.generator.program.get_ctype(element_ctypeid);
-                let element_size = self.generator.sizeof_ctype(element_ctype);
 
                 let temp_index_storage = self.allocate_anon(CPrimitive::Int);
                 let temp_ptr_storage =
-                    self.allocate_anon(self.generator.program.pointer_to(CPrimitive::Void));
+                    self.allocate_anon(self.generator.program.pointer_to(element_ctype));
 
-                self.generate_expr(right, temp_index_storage)?;
-                self.generate_expr(left, temp_ptr_storage)?;
-
-                let result_size = self.generator.sizeof_ctype(destination.ctype);
+                self.get_rvalue(right, temp_index_storage)?;
+                self.get_rvalue(left, temp_ptr_storage)?;
 
                 let ele_pointer = self.reg();
+
+                self.b.load_dword(ele_pointer, temp_ptr_storage);
+
                 let ele_index = self.reg();
 
-                self.b.ldr(ele_pointer, temp_ptr_storage);
-                self.b.ldr(ele_index, temp_index_storage);
+                self.b.load_dword(ele_index, temp_index_storage);
+
+                let element_size = self.generator.sizeof_ctype(element_ctype);
+
+                if element_size > 1 {
+                    if !element_size.is_power_of_two() {
+                        todo!("Support indexing non-power of 2 element sizes (requires multiplication)");
+                    }
+
+                    self.b
+                        .shift_left(ele_index, ele_index, element_size.ilog2());
+                }
+
+                self.b.add(ele_pointer, ele_pointer, ele_index);
+
+                self.b.release_reg(ele_index);
 
                 self.b.header("freeing index & ptr");
                 self.free_local(temp_index_storage);
                 self.free_local(temp_ptr_storage);
 
-                match element_size {
-                    1 => {
-                        self.b.ldrb(ele_pointer, ele_pointer + ele_index);
-
-                        if result_size == 1 {
-                            self.b.strb(ele_pointer, destination.address);
-                        } else {
-                            self.b.str(ele_pointer, destination.address);
-                        }
-                    }
-
-                    2 => {
-                        // FIXME: I'm probably doing this big-endian by accident!!
-                        let temp = self.reg();
-
-                        self.b.shl(temp, ele_index, 1);
-                        self.b.add(temp, ele_pointer, temp);
-                        self.b.ldrb(ele_pointer, temp + 0);
-                        self.b.ldrb(ele_index, temp + 1);
-
-                        self.release_reg(temp);
-
-                        self.b.shl(ele_pointer, ele_pointer, 8);
-                        self.b.or(ele_pointer, ele_pointer, ele_index);
-                        self.b.str(ele_pointer, destination.address);
-                    }
-
-                    3 => {
-                        // FIXME: I'm probably doing this big-endian by accident!!
-                        let temp = self.reg();
-
-                        self.b.shl(temp, ele_index, 1);
-                        self.b.add(temp, temp, ele_index);
-                        self.b.add(temp, ele_pointer, temp);
-                        self.b.ldrb(ele_pointer, temp + 0);
-                        self.b.ldrb(ele_index, temp + 1);
-                        self.b.shl(ele_pointer, ele_pointer, 8);
-                        self.b.or(ele_pointer, ele_pointer, ele_index);
-                        self.b.ldrb(ele_index, temp + 2);
-
-                        self.release_reg(temp);
-
-                        self.b.shl(ele_pointer, ele_pointer, 8);
-                        self.b.or(ele_pointer, ele_pointer, ele_index);
-                        self.b.str(ele_pointer, destination.address);
-                    }
-
-                    4 => {
-                        self.b.shl(ele_index, ele_index, 2);
-                        self.b.ldr(ele_pointer, ele_pointer + ele_index);
-                        self.b.str(ele_pointer, destination.address);
-                    }
-
-                    _ => todo!("{element_ctype:?} ({element_size} bytes) can't fit in a register"),
-                }
+                self.copy_lvalue(
+                    TypedLocation::new(element_ctype, Address::at(ele_pointer)),
+                    destination,
+                )?;
 
                 self.release_reg(ele_pointer);
-                self.release_reg(ele_index);
             }
             BinaryOp::BitwiseLeftShift => todo!(),
             BinaryOp::BitwiseRightShift => todo!(),
@@ -1094,8 +1115,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let left_temp = self.allocate_anon(left_ctype);
                 let right_temp = self.allocate_anon(right_ctype);
 
-                self.generate_expr(left, left_temp)?;
-                self.generate_expr(right, right_temp)?;
+                self.get_rvalue(left, left_temp)?;
+                self.get_rvalue(right, right_temp)?;
 
                 if destination.is_nowhere() {
                     // discard the result.
@@ -1104,8 +1125,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 let [left_reg, right_reg] = self.regs();
 
-                self.b.ldr(left_reg, left_temp);
-                self.b.ldr(right_reg, right_temp);
+                self.b.load_dword(left_reg, left_temp);
+                self.b.load_dword(right_reg, right_temp);
 
                 self.free_local(left_temp);
                 self.free_local(right_temp);
@@ -1123,18 +1144,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     _ => todo!(),
                 };
 
-                let condition_reg = self.reg();
-
-                self.b.mov(condition_reg, 0);
+                self.b.copy_dword(0, destination.location);
                 self.b.b(done);
 
                 self.b.label(upon_true);
-                self.b.mov(condition_reg, 1);
+                self.b.copy_dword(1, destination.location);
 
                 self.b.label(done);
-                self.b.str(condition_reg, destination.address);
-
-                self.release_reg(condition_reg);
             }
 
             BinaryOp::BitwiseXor => todo!(),
@@ -1152,13 +1168,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 });
 
                 self.b.header("Evaluate LHS");
-                self.generate_expr(left, condition_storage)?;
+                self.get_rvalue(left, condition_storage)?;
 
                 self.b.header("Test if LHS is truthy");
 
                 let condition_reg = self.reg();
 
-                self.b.ldr(condition_reg, condition_storage);
+                self.b.load_dword(condition_reg, condition_storage);
                 self.b.cmp(condition_reg, 0);
 
                 self.release_reg(condition_reg);
@@ -1171,7 +1187,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.b.header("LHS is falsey, evaluate RHS");
                 }
 
-                self.generate_expr(right, condition_storage)?;
+                self.get_rvalue(right, condition_storage)?;
 
                 self.b.label(done_label);
 
@@ -1183,12 +1199,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         )
                     }
 
-                    let condition_reg = self.reg();
-
-                    self.b.ldr(condition_reg, condition_storage);
-                    self.b.str(condition_reg, destination.address);
-
-                    self.release_reg(condition_reg);
+                    self.copy_lvalue(condition_storage, destination)?;
                 }
 
                 self.free_local(condition_storage);
@@ -1200,10 +1211,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
     fn type_of_expr(&self, expr: &Expr) -> anyhow::Result<CType> {
         match expr {
-            Expr::StringLiteral(_) => Ok(CType::PointerTo(
-                self.generator.program.ctype_id_of(CPrimitive::Char),
-            )),
-
+            Expr::StringLiteral(_) => Ok(self.generator.program.pointer_to(CPrimitive::Char)),
             Expr::IntLiteral(_) => Ok(CPrimitive::Int.into()),
 
             Expr::Reference(name) => {
@@ -1233,10 +1241,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     "{} is not a valid call target",
                     self.generator.program.format_ctype(inner)
                 ),
-                CType::PointerTo(_) => {
+                CType::PointerTo(_, _) => {
                     bail!("Non-function pointer is not a valid call target")
                 }
-                CType::ArrayOf(_, _) => bail!("An array is not a valid call target"),
             },
 
             Expr::BinaryOp(op, left, right) => match op {
@@ -1260,9 +1267,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 BinaryOp::ArrayIndex => match self.type_of_expr(left)? {
                     CType::AsIs(_) => bail!("Can't index a concrete type as an array!"),
-                    CType::PointerTo(inner) | CType::ArrayOf(inner, _) => {
-                        Ok(self.generator.program.get_ctype(inner))
-                    }
+                    CType::PointerTo(inner, _) => Ok(self.generator.program.get_ctype(inner)),
                 },
 
                 BinaryOp::BitwiseLeftShift => todo!(),
@@ -1282,15 +1287,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 UnaryOp::BooleanNot => Ok(CPrimitive::Bool.into()),
                 UnaryOp::Negative => self.type_of_expr(expr),
 
-                UnaryOp::AddressOf => Ok(CType::PointerTo(
-                    self.generator.program.ctype_id_of(self.type_of_expr(expr)?),
-                )),
+                UnaryOp::AddressOf => {
+                    Ok(self.generator.program.pointer_to(self.type_of_expr(expr)?))
+                }
 
                 UnaryOp::Dereference => match self.type_of_expr(expr)? {
                     CType::AsIs(_) => bail!("Can't dereference a concrete type!"),
-                    CType::PointerTo(inner) | CType::ArrayOf(inner, _) => {
-                        Ok(self.generator.program.get_ctype(inner))
-                    }
+                    CType::PointerTo(inner, _) => Ok(self.generator.program.get_ctype(inner)),
                 },
             },
 
@@ -1321,19 +1324,19 @@ fn stack_offset(offset: i32) -> Address {
 #[derive(Clone, Copy)]
 struct TypedLocation {
     ctype: CType,
-    address: Address,
+    location: Location,
 }
 
 impl TypedLocation {
-    const fn new(ctype: CType, address: Address) -> Self {
-        Self { ctype, address }
+    fn new(ctype: CType, location: impl Into<Location>) -> Self {
+        Self {
+            ctype,
+            location: location.into(),
+        }
     }
 
     const fn is_nowhere(&self) -> bool {
-        matches!(
-            self.ctype,
-            CType::AsIs(CConcreteType::Primitive(CPrimitive::Void))
-        )
+        matches!(self.ctype, CType::AsIs(CConcreteType::Void))
     }
 
     const fn is_somewhere(&self) -> bool {
@@ -1347,10 +1350,10 @@ impl From<StackLocal> for TypedLocation {
     }
 }
 
-const NOWHERE: TypedLocation = TypedLocation::new(
-    CType::AsIs(CConcreteType::Primitive(CPrimitive::Void)),
-    Address::LiteralIndex(LiteralIndexAddress {
+const NOWHERE: TypedLocation = TypedLocation {
+    ctype: CType::AsIs(CConcreteType::Void),
+    location: Location::Address(Address::LiteralIndex {
         base: Reg::LinkReg,
         offset: 0,
     }),
-);
+};

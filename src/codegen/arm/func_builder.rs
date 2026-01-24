@@ -2,7 +2,7 @@ use std::{
     cell::Cell,
     collections::{HashMap, HashSet, VecDeque},
     fmt::Display,
-    ops::Not,
+    ops::{Add, Not},
 };
 
 use bimap::BiMap;
@@ -10,9 +10,17 @@ use indexmap::IndexMap;
 use itertools::Itertools;
 
 use crate::{
-    codegen::arm::{
-        Address, AsmMode, BranchTarget, CommentPosition, Inst, LiteralIndexAddress,
-        OneOrMoreRegisters, Reg, RegOrImmediate,
+    codegen::{
+        arm::{
+            address::Address,
+            inst::{BranchTarget, CommentPosition, Inst},
+            location::Location,
+            reg::{OneOrMoreRegisters, Reg},
+            reg_or_imm::RegOrImm,
+            value::{Value, ValueWidth},
+            AsmMode, Imm,
+        },
+        WORD_SIZE,
     },
     id_type::GetAndIncrement,
     parser::program::types::CFuncType,
@@ -29,11 +37,11 @@ pub(crate) struct FuncBuilder<'a> {
     labels: HashMap<LabelId, String>,
     next_label_id: Cell<LabelId>,
     pub asm_mode: AsmMode,
-    register_pool: IndexMap<Reg, RegStatus>,
+    pub(crate) register_pool: IndexMap<Reg, RegStatus>,
 }
 
-struct RegStatus {
-    available: bool,
+pub(crate) struct RegStatus {
+    pub available: bool,
     clobbered: bool,
 }
 
@@ -117,6 +125,310 @@ impl<'a> FuncBuilder<'a> {
         }
     }
 
+    /// Copy an arbitrary number of contiguous bytes from the source location to the destination
+    /// location.
+    pub fn copy_bytes(
+        &mut self,
+        source: impl Into<Location>,
+        destination: impl Into<Location>,
+        byte_count: u32,
+    ) {
+        let source = source.into();
+        let destination = destination.into();
+
+        if let Ok(width) = ValueWidth::try_from(byte_count) {
+            return self.copy_value(source, destination, width);
+        }
+
+        match (source, destination) {
+            (Location::Address(source_address), Location::Address(destination_address)) => {
+                let [source_addr_reg, destination_addr_reg] = self.regs();
+
+                self.load_address(source_addr_reg, source_address, 0);
+                self.load_address(destination_addr_reg, destination_address, 0);
+
+                for _ in 0..(byte_count / 4) {
+                    self.copy_dword(
+                        Address::at(source_addr_reg),
+                        Address::at(destination_addr_reg),
+                    );
+
+                    self.add(source_addr_reg, source_addr_reg, 4);
+                    self.add(destination_addr_reg, destination_addr_reg, 4);
+                }
+
+                match byte_count % 4 {
+                    0 => (),
+
+                    1 => self.copy_byte(
+                        Address::at(source_addr_reg),
+                        Address::at(destination_addr_reg),
+                    ),
+
+                    2 => self.copy_word(
+                        Address::at(source_addr_reg),
+                        Address::at(destination_addr_reg),
+                    ),
+
+                    3 => {
+                        self.copy_word(
+                            Address::at(source_addr_reg),
+                            Address::at(destination_addr_reg),
+                        );
+
+                        self.copy_byte(source_addr_reg + 2, destination_addr_reg + 2);
+                    }
+
+                    4 => self.copy_dword(
+                        Address::at(source_addr_reg),
+                        Address::at(destination_addr_reg),
+                    ),
+
+                    _ => unreachable!(),
+                };
+
+                self.release_reg([source_addr_reg, destination_addr_reg]);
+            }
+
+            (Location::Address(source_address), Location::Reg(destination_reg)) => {
+                assert_eq!(byte_count, 3, "Copying from address to register, byte count must be <= DWORD, got {byte_count}");
+
+                self.load_dword(destination_reg, source_address);
+                self.bitwise_and(destination_reg, destination_reg, 0xffffff);
+            }
+
+            (Location::Reg(reg), Location::Address(address)) => {
+                if byte_count == 3 {
+                    self.store_word(reg, address);
+
+                    let addr_reg = self.reg();
+
+                    self.load_address(addr_reg, address, 2);
+                    self.copy_byte(reg, addr_reg);
+
+                    self.release_reg(addr_reg);
+                } else {
+                    todo!(
+                        "Pad copy of {byte_count} bytes from {reg} to {}",
+                        self.format_address(&address)
+                    )
+                }
+            }
+
+            (Location::Reg(source_reg), Location::Reg(destination_reg)) if byte_count == 3 => {
+                self.bitwise_and(destination_reg, destination_reg, 0xff000000_u32);
+                self.bitwise_and(source_reg, source_reg, 0x00ffffff);
+                self.or(destination_reg, destination_reg, source_reg);
+            }
+
+            (Location::Reg(source_reg), Location::Reg(destination_reg)) => {
+                panic!("Can't copy {byte_count} bytes from {source_reg} to {destination_reg}")
+            }
+        }
+    }
+
+    /// Copy a value with a given size to the given location.
+    pub fn copy_value(
+        &mut self,
+        value: impl Into<Value>,
+        destination: impl Into<Location>,
+        width: ValueWidth,
+    ) {
+        let value = value.into();
+        let destination = destination.into();
+
+        match (value, destination) {
+            (Value::Address(source_address), Location::Address(destination_address)) => match width
+            {
+                ValueWidth::Byte => {
+                    let value_holder = self.reg();
+
+                    self.load_byte(value_holder, source_address);
+                    self.store_byte(value_holder, destination_address);
+
+                    self.release_reg(value_holder);
+                }
+
+                ValueWidth::Word => {
+                    let reg = self.reg();
+
+                    // We can ignore the upper 16 bits, loading a dword is faster.
+                    self.load_dword(reg, source_address);
+                    self.store_word(reg, destination_address);
+
+                    self.release_reg(reg);
+                }
+
+                ValueWidth::DWord => {
+                    let value_holder = self.reg();
+
+                    self.load_dword(value_holder, source_address);
+                    self.store_dword(value_holder, destination_address);
+
+                    self.release_reg(value_holder);
+                }
+
+                ValueWidth::QWord => {
+                    let [value_holder, addr_holder] = self.regs();
+
+                    self.load_dword(value_holder, source_address);
+                    self.store_dword(value_holder, destination_address);
+
+                    self.load_address(addr_holder, source_address, 4);
+                    self.load_dword(value_holder, Address::at(addr_holder));
+
+                    self.load_address(addr_holder, destination_address, 4);
+                    self.store_dword(value_holder, Address::at(addr_holder));
+
+                    self.release_reg([value_holder, addr_holder]);
+                }
+            },
+
+            (Value::Address(address), Location::Reg(destination_reg)) => match width {
+                ValueWidth::Byte => self.load_byte(destination_reg, address),
+                ValueWidth::Word => self.load_word(destination_reg, address),
+                ValueWidth::DWord => self.load_dword(destination_reg, address),
+                ValueWidth::QWord => panic!("A register can't hold a QWord"),
+            },
+
+            (Value::Reg(source_reg), Location::Address(destination_address)) => match width {
+                ValueWidth::Byte => self.store_dword(source_reg, destination_address),
+                ValueWidth::Word => self.store_word(source_reg, destination_address),
+                ValueWidth::DWord => self.store_dword(source_reg, destination_address),
+                ValueWidth::QWord => {
+                    self.store_dword(source_reg, destination_address);
+
+                    let addr_holder = self.reg();
+
+                    self.load_address(addr_holder, destination_address, 4);
+                    self.store_dword(0, Address::at(addr_holder));
+
+                    self.release_reg(addr_holder);
+                }
+            },
+
+            (Value::Reg(source_reg), Location::Reg(destination_reg)) => match width {
+                ValueWidth::Byte => self.move_byte(destination_reg, source_reg),
+                ValueWidth::Word => self.move_word(destination_reg, source_reg),
+                ValueWidth::DWord => self.move_dword(destination_reg, source_reg),
+                ValueWidth::QWord => panic!("A register can't hold a QWord"),
+            },
+
+            (Value::Imm(imm), Location::Reg(destination_reg)) => match width {
+                ValueWidth::Byte => self.move_byte(destination_reg, imm),
+                ValueWidth::Word => self.move_word(destination_reg, imm),
+                ValueWidth::DWord => self.move_dword(destination_reg, imm),
+                ValueWidth::QWord => panic!("A register can't hold a QWord"),
+            },
+
+            (Value::Imm(imm), Location::Address(destination_address)) => match width {
+                ValueWidth::Byte => self.store_byte(imm, destination_address),
+                ValueWidth::Word => self.store_word(imm, destination_address),
+                ValueWidth::DWord => self.store_dword(imm, destination_address),
+                ValueWidth::QWord => {
+                    self.store_dword(imm, destination_address);
+
+                    let addr_holder = self.reg();
+
+                    self.load_address(addr_holder, destination_address, 4);
+                    self.store_dword(0, Address::at(addr_holder));
+
+                    self.release_reg(addr_holder);
+                }
+            },
+        }
+    }
+
+    /// Copy a qword-sized value to the given location.
+    pub fn copy_qword(&mut self, value: impl Into<Value>, destination: impl Into<Location>) {
+        self.copy_value(value, destination, ValueWidth::QWord);
+    }
+
+    /// Copy a dword-sized value to the given location.
+    pub fn copy_dword(&mut self, value: impl Into<Value>, destination: impl Into<Location>) {
+        self.copy_value(value, destination, ValueWidth::DWord);
+    }
+
+    /// Copy a word-sized value to the given location.
+    pub fn copy_word(&mut self, value: impl Into<Value>, destination: impl Into<Location>) {
+        self.copy_value(value, destination, ValueWidth::Word);
+    }
+
+    /// Copy a byte-sized value to the given location.
+    pub fn copy_byte(&mut self, value: impl Into<Value>, destination: impl Into<Location>) {
+        self.copy_value(value, destination, ValueWidth::Byte);
+    }
+
+    pub fn store_dword(&mut self, src: impl Into<RegOrImm>, addr: impl Into<Address>) {
+        match src.into() {
+            RegOrImm::Reg(reg) => self.append(Inst::Store(reg, addr.into())),
+
+            src => {
+                let reg = self.reg();
+
+                self.move_dword(reg, src);
+                self.append(Inst::Store(reg, addr.into()));
+
+                self.release_reg(reg);
+            }
+        }
+    }
+
+    /// Store a word-sized value to the given address.
+    pub fn store_word(&mut self, source: impl Into<RegOrImm>, destination: impl Into<Address>) {
+        let source = source.into();
+        let destination = destination.into();
+
+        let [value_reg, addr_reg] = self.regs();
+
+        self.move_dword(value_reg, source);
+        self.store_byte(value_reg, destination);
+
+        self.load_address(addr_reg, destination, 1);
+        self.shift_right(value_reg, value_reg, 8);
+        self.store_byte(value_reg, Address::at(addr_reg));
+
+        self.release_reg([value_reg, addr_reg]);
+    }
+
+    /// Store a byte-sized value to the given address.
+    pub fn store_byte(&mut self, src: impl Into<RegOrImm>, addr: impl Into<Address>) {
+        match src.into() {
+            RegOrImm::Reg(reg) => self.append(Inst::StoreB(reg, addr.into())),
+
+            src => {
+                let reg = self.reg();
+
+                self.move_dword(reg, src);
+                self.append(Inst::StoreB(reg, addr.into()));
+
+                self.release_reg(reg);
+            }
+        }
+    }
+
+    pub fn load_dword(&mut self, dest: Reg, addr: impl Into<Address>) {
+        self.append(Inst::Load(dest, addr.into()))
+    }
+
+    pub fn load_word(&mut self, dest: Reg, addr: impl Into<Address>) {
+        self.load_dword(dest, addr);
+        self.truncate_register(dest, ValueWidth::Word);
+    }
+
+    pub fn load_byte(&mut self, dest: Reg, addr: impl Into<Address>) {
+        self.append(Inst::LoadB(dest, addr.into()))
+    }
+
+    /// Truncate the value stored in the given register to the given width.
+    pub fn truncate_register(&mut self, reg: Reg, width: ValueWidth) {
+        match width {
+            ValueWidth::Byte => self.bitwise_and(reg, reg, 0xff),
+            ValueWidth::Word => self.bitwise_and(reg, reg, 0xffff),
+            ValueWidth::DWord | ValueWidth::QWord => (/* No-op */),
+        }
+    }
+
     pub fn append_doc_line(&mut self, line: impl Into<String>) {
         self.doc_comment.push(line.into());
     }
@@ -144,7 +456,7 @@ impl<'a> FuncBuilder<'a> {
         id
     }
 
-    pub fn label(&mut self, id: LabelId) -> &mut Self {
+    pub fn label(&mut self, id: LabelId) {
         self.append(Inst::Label(id))
     }
 
@@ -152,100 +464,101 @@ impl<'a> FuncBuilder<'a> {
         self.append(Inst::InlineAsm(asm.into()));
     }
 
-    pub fn push(&mut self, regs: impl Into<OneOrMoreRegisters>) -> &mut Self {
+    pub fn push(&mut self, regs: impl Into<OneOrMoreRegisters>) {
         self.append(Inst::Push(regs.into()))
     }
 
-    pub fn pop(&mut self, regs: impl Into<OneOrMoreRegisters>) -> &mut Self {
+    pub fn pop(&mut self, regs: impl Into<OneOrMoreRegisters>) {
         self.append(Inst::Pop(regs.into()))
     }
 
-    pub fn mov(&mut self, dest: Reg, src: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn move_dword(&mut self, dest: Reg, src: impl Into<RegOrImm>) {
         self.append(Inst::Mov(dest, src.into()))
     }
 
-    pub fn cmp(&mut self, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn move_word(&mut self, dest: Reg, src: impl Into<RegOrImm>) {
+        self.move_dword(dest, src);
+        self.truncate_register(dest, ValueWidth::Word);
+    }
+
+    pub fn move_byte(&mut self, dest: Reg, src: impl Into<RegOrImm>) {
+        self.move_dword(dest, src);
+        self.truncate_register(dest, ValueWidth::Byte);
+    }
+
+    pub fn cmp(&mut self, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::Cmp(left, right.into()))
     }
 
-    pub fn ldr(&mut self, dest: Reg, addr: impl Into<Address>) -> &mut Self {
-        self.append(Inst::Load(dest, addr.into()))
-    }
-
-    pub fn str(&mut self, src: Reg, addr: impl Into<Address>) -> &mut Self {
-        self.append(Inst::Store(src, addr.into()))
-    }
-
-    pub fn ldrb(&mut self, dest: Reg, addr: impl Into<Address>) -> &mut Self {
-        self.append(Inst::LoadB(dest, addr.into()))
-    }
-
-    pub fn strb(&mut self, src: Reg, addr: impl Into<Address>) -> &mut Self {
-        self.append(Inst::StoreB(src, addr.into()))
-    }
-
-    pub fn add(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn add(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::Add(dest, left, right.into()))
     }
 
-    pub fn sub(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn sub(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::Sub(dest, left, right.into()))
     }
 
-    pub fn or(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn or(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::BitOr(dest, left, right.into()))
     }
 
-    pub fn and(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn bitwise_and(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::BitAnd(dest, left, right.into()))
     }
 
-    pub fn xor(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn xor(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::BitXor(dest, left, right.into()))
     }
 
-    pub fn shl(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn shift_left(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::BitShl(dest, left, right.into()))
     }
 
-    pub fn shr(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImmediate>) -> &mut Self {
+    pub fn shift_right(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::BitShr(dest, left, right.into()))
     }
 
-    pub fn call(&mut self, name: impl Into<String>) -> &mut Self {
+    pub fn call(&mut self, name: impl Into<String>) {
         self.append(Inst::Call(name.into()))
     }
 
-    pub fn b(&mut self, name: impl Into<BranchTarget>) -> &mut Self {
+    pub fn b(&mut self, name: impl Into<BranchTarget>) {
         self.append(Inst::B(name.into()))
     }
 
-    pub fn beq(&mut self, name: impl Into<BranchTarget>) -> &mut Self {
+    pub fn beq(&mut self, name: impl Into<BranchTarget>) {
         self.append(Inst::BEq(name.into()))
     }
 
-    pub fn bne(&mut self, name: impl Into<BranchTarget>) -> &mut Self {
+    pub fn bne(&mut self, name: impl Into<BranchTarget>) {
         self.append(Inst::BNe(name.into()))
     }
 
-    pub fn blt(&mut self, name: impl Into<BranchTarget>) -> &mut Self {
+    pub fn blt(&mut self, name: impl Into<BranchTarget>) {
         self.append(Inst::BLt(name.into()))
     }
 
-    pub fn bgt(&mut self, name: impl Into<BranchTarget>) -> &mut Self {
+    pub fn bgt(&mut self, name: impl Into<BranchTarget>) {
         self.append(Inst::BGt(name.into()))
     }
 
-    pub fn ret(&mut self) -> &mut Self {
+    pub fn ret(&mut self) {
         self.append(Inst::Ret)
     }
 
-    /// Load the address `addr` into the destination register `dest`. Works like x86's `LEA`.
-    pub fn load_address(&mut self, dest: Reg, addr: impl Into<Address>) {
+    /// Load the address `addr` into the destination register `dest`. Works like x86's `LEA`, but
+    /// also takes an extra offset (or 0).
+    ///
+    /// When the address is a `LiteralIndexAddress`, the offset can be added to the existing offset
+    /// for free, rather than also performing an `add`.
+    pub fn load_address(&mut self, dest: Reg, addr: impl Into<Address>, extra_offset: i32) {
         let addr = addr.into();
 
         match addr {
-            Address::LiteralIndex(LiteralIndexAddress { base, offset: 0 }) => self.mov(dest, base),
+            Address::LiteralIndex { base, offset: 0 } => match extra_offset {
+                0 => self.move_dword(dest, base),
+                _ => self.load_address(dest, base + extra_offset, 0),
+            },
 
             Address::RelativeIndex(addr) => {
                 if addr.negate_offset {
@@ -253,13 +566,17 @@ impl<'a> FuncBuilder<'a> {
                 } else {
                     self.add(dest, addr.base, addr.offset)
                 }
+
+                if extra_offset != 0 {
+                    self.add(dest, dest, extra_offset);
+                }
             }
 
-            Address::LiteralIndex(addr) => {
-                if addr.offset < 0 {
-                    self.sub(dest, addr.base, -addr.offset)
+            Address::LiteralIndex { base, offset } => {
+                if offset < 0 {
+                    self.sub(dest, base, -offset - extra_offset)
                 } else {
-                    self.add(dest, addr.base, addr.offset)
+                    self.add(dest, base, offset + extra_offset)
                 }
             }
         };
@@ -269,9 +586,8 @@ impl<'a> FuncBuilder<'a> {
         format!("{self}")
     }
 
-    fn append(&mut self, inst: Inst) -> &mut Self {
+    fn append(&mut self, inst: Inst) {
         self.instructions.push(inst);
-        self
     }
 
     fn format_label(&self, id: LabelId) -> String {
@@ -292,11 +608,14 @@ impl<'a> FuncBuilder<'a> {
         format!("fn_{name}")
     }
 
-    fn format_operand(&self, operand: RegOrImmediate) -> String {
+    fn format_operand(&self, operand: RegOrImm) -> String {
         match operand {
-            RegOrImmediate::Reg(reg) => format!("{reg}"),
-            RegOrImmediate::ImmI32(value) => format!("#{value}"),
-            RegOrImmediate::ImmF32(value) => {
+            RegOrImm::Reg(reg) => format!("{reg}"),
+            RegOrImm::Imm(Imm::I32(value)) => format!("#{value}"),
+            RegOrImm::Imm(Imm::U32(value)) => {
+                format!("#{value}", value = u32::cast_signed(value))
+            }
+            RegOrImm::Imm(Imm::F32(value)) => {
                 // Convert the number into the IEEE 754 32-bit float
                 // representation, but display it as a signed integer literal, since ARMLite doesn't
                 // support floats.
@@ -306,13 +625,13 @@ impl<'a> FuncBuilder<'a> {
                 let bitcasted_float = f32::to_bits(value) as i32;
                 format!("#{bitcasted_float}")
             }
-            RegOrImmediate::StringId(string_id) => format!("#str_{}", string_id.value()),
+            RegOrImm::Imm(Imm::StringId(string_id)) => format!("#str_{}", string_id.value()),
         }
     }
 
     pub fn format_address(&self, address: &Address) -> String {
         match address {
-            Address::LiteralIndex(LiteralIndexAddress { base, offset: 0 }) => format!("[{base}]"),
+            Address::LiteralIndex { base, offset: 0 } => format!("[{base}]"),
 
             Address::RelativeIndex(addr) => match self.asm_mode {
                 AsmMode::ArmLite => format!(
@@ -326,19 +645,21 @@ impl<'a> FuncBuilder<'a> {
                 }
             },
 
-            Address::LiteralIndex(addr) => match self.asm_mode {
+            &Address::LiteralIndex { base, offset } => match self.asm_mode {
                 AsmMode::ArmLite => format!(
                     "[{base}{symbol}#{offset}]",
-                    base = addr.base,
-                    symbol = if addr.offset < 0 { "-" } else { "+" },
-                    offset = addr.offset.abs()
+                    symbol = if offset < 0 { "-" } else { "+" },
+                    offset = offset.abs()
                 ),
-                AsmMode::ArmV7 => format!(
-                    "[{base}, #{offset}]",
-                    base = addr.base,
-                    offset = addr.offset
-                ),
+                AsmMode::ArmV7 => format!("[{base}, #{offset}]"),
             },
+        }
+    }
+
+    pub fn format_location(&self, location: &Location) -> String {
+        match location {
+            Location::Address(address) => self.format_address(address),
+            Location::Reg(reg) => format!("{reg}"),
         }
     }
 }

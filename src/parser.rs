@@ -183,7 +183,7 @@ impl<'a> Parser<'a> {
 
             if self.next_is(TokenKind::OpenParen) {
                 // function pointer AHHHHHHHHHHHH
-                let CType::PointerTo(return_ctype_id) = this_type else {
+                let CType::PointerTo(return_ctype_id, None) = this_type else {
                     return self.error("Expecting a pointer when parsing a function type");
                 };
 
@@ -216,7 +216,7 @@ impl<'a> Parser<'a> {
 
             self.expect(TokenKind::CloseSquare)?;
 
-            this_type = CType::ArrayOf(
+            this_type = CType::array_of(
                 self.program.ctype_id_of(this_type),
                 element_count
                     .try_into()
@@ -232,7 +232,7 @@ impl<'a> Parser<'a> {
 
         // Evil right-associative pointer syntax >:(((
         while self.accept(TokenKind::Star) {
-            this_type = CType::PointerTo(self.program.ctype_id_of(this_type));
+            this_type = CType::pointer_to(self.program.ctype_id_of(this_type));
         }
 
         Ok(this_type)
@@ -664,38 +664,32 @@ impl<'a> Parser<'a> {
             }
 
             // Maybe we've got a number?
-            _ => self
-                .parse_numeric_type()
-                .map(|numeric_type| CType::AsIs(numeric_type.into())),
+            _ => self.parse_numeric_type().map(CType::AsIs),
         }
     }
 
-    fn parse_numeric_type(&mut self) -> Result<CPrimitive, ParseError> {
+    fn parse_numeric_type(&mut self) -> Result<CConcreteType, ParseError> {
         if self.accept(TokenKind::Unsigned) {
             return self
-                .parse_terminal_numeric_type()?
+                .parse_numeric_type()?
                 .unsigned()
                 .ok_or_else(|| todo!("handle bad numeric unsigned"));
         }
 
         if self.accept(TokenKind::Signed) {
             return self
-                .parse_terminal_numeric_type()?
+                .parse_numeric_type()?
                 .signed()
                 .ok_or_else(|| todo!("handle bad numeric signed"));
         }
 
-        self.parse_terminal_numeric_type()
-    }
-
-    fn parse_terminal_numeric_type(&mut self) -> Result<CPrimitive, ParseError> {
         if let Some(basic_type) = self.maybe_map_next(|token| match token {
-            TokenKind::Void => Some(CPrimitive::Void),
-            TokenKind::Bool => Some(CPrimitive::Bool),
-            TokenKind::Int => Some(CPrimitive::Int),
-            TokenKind::Char => Some(CPrimitive::Char),
-            TokenKind::Float => Some(CPrimitive::Float),
-            TokenKind::Double => Some(CPrimitive::Double),
+            TokenKind::Void => Some(CConcreteType::Void),
+            TokenKind::Bool => Some(CPrimitive::Bool.into()),
+            TokenKind::Int => Some(CPrimitive::Int.into()),
+            TokenKind::Char => Some(CPrimitive::Char.into()),
+            TokenKind::Float => Some(CPrimitive::Float.into()),
+            TokenKind::Double => Some(CPrimitive::Double.into()),
             _ => None,
         }) {
             return Ok(basic_type);
@@ -703,10 +697,10 @@ impl<'a> Parser<'a> {
 
         if self.accept(TokenKind::Short) {
             if self.accept(TokenKind::Int) {
-                return Ok(CPrimitive::Short);
+                return Ok(CPrimitive::Short.into());
             }
 
-            return Ok(CPrimitive::Short);
+            return Ok(CPrimitive::Short.into());
         }
 
         if self.accept(TokenKind::Long) {
@@ -715,17 +709,17 @@ impl<'a> Parser<'a> {
                 // (optional "int" suffix here)
                 self.accept(TokenKind::Int);
 
-                return Ok(CPrimitive::LongLong);
+                return Ok(CPrimitive::LongLong.into());
             }
 
             if self.accept(TokenKind::Double) {
-                return Ok(CPrimitive::LongDouble);
+                return Ok(CPrimitive::LongDouble.into());
             }
 
             // again, optional "int".
             self.accept(TokenKind::Int);
 
-            return Ok(CPrimitive::Long);
+            return Ok(CPrimitive::Long.into());
         }
 
         Err(self.unexpected_token())

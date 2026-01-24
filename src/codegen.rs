@@ -8,12 +8,13 @@ use std::{
     sync::LazyLock,
 };
 
+use anyhow::{anyhow, bail};
 use itertools::Itertools;
 use phf::phf_map;
 
 use crate::{
     codegen::{
-        arm::{file_builder::FileBuilder, func_builder, Address, AsmMode, Reg, RegOrImmediate},
+        arm::{file_builder::FileBuilder, func_builder, reg::Reg, AsmMode},
         func_builder::FuncBuilder,
         func_generator::FuncGenerator,
     },
@@ -51,41 +52,10 @@ impl Generator {
             "start",
             &CFuncType {
                 args: vec![],
-                returns: CPrimitive::Void.into(),
+                returns: CConcreteType::Void.into(),
                 is_noreturn: true,
             },
             |b| {
-                const PRELUDE: &str = r#"
-; ==================================================================================================
-; C RUNTIME PRELUDE
-; ==================================================================================================
-
-c_entry:
-	BL fn_main
-c_entry_post_run:
-	MOV R4, R0						; Grab the return code.
-
-	MOV R0, #const_c_entry_exitcode_msg_start
-	PUSH {R0}
-	BL fn_WriteString
-
-	PUSH {R4}
-	BL fn_WriteSignedNum
-
-	MOV R0, #const_c_entry_exitcode_msg_end
-	PUSH {R0}
-	BL fn_WriteString
-c_halt:
-	HLT
-	B c_halt
-
-const_c_entry_exitcode_msg_start:	.ASCIZ "\nProgram exited with code "
-const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
-
-; ==================================================================================================
-; END OF PRELUDE
-; ==================================================================================================
-"#;
                 b.append_doc_line("C Runtime Entry Point");
                 b.append_doc_line("Initialises the C environment and calls main().");
 
@@ -93,7 +63,7 @@ const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
 
                 b.asm("c_entry_post_run:");
                 b.inline_comment("Grab the return code.");
-                b.mov(Reg::R4, Reg::R0);
+                b.push(Reg::R0);
 
                 let exitcode_msg_start = self
                     .file_builder
@@ -101,14 +71,12 @@ const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
 
                 let exitcode_msg_end = self.file_builder.create_string(".\\n");
 
-                b.mov(Reg::R0, exitcode_msg_start);
+                b.move_dword(Reg::R0, exitcode_msg_start);
                 b.push(Reg::R0);
                 b.call("WriteString");
-
-                b.push(Reg::R4);
                 b.call("WriteSignedNum");
 
-                b.mov(Reg::R0, exitcode_msg_end);
+                b.move_dword(Reg::R0, exitcode_msg_end);
                 b.push(Reg::R0);
                 b.call("WriteString");
 
@@ -187,9 +155,9 @@ const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
         }
 
         let size = match ctype {
-            CType::PointerTo(_) => WORD_SIZE,
+            CType::PointerTo(_, None) => WORD_SIZE,
 
-            CType::ArrayOf(inner_id, element_count) => {
+            CType::PointerTo(inner_id, Some(element_count)) => {
                 self.sizeof_ctype(self.program.get_ctype(inner_id)) * element_count
             }
 
@@ -209,30 +177,148 @@ const_c_entry_exitcode_msg_end:		.ASCIZ ".\n"
 
                 CConcreteType::Enum(cenum_id) => WORD_SIZE,
                 CConcreteType::Func(_) => WORD_SIZE,
-
-                CConcreteType::Primitive(builtin) => match builtin {
-                    CPrimitive::Void => 0,
-                    CPrimitive::Bool => 1,
-                    CPrimitive::Char => 1,
-                    CPrimitive::SignedChar => 1,
-                    CPrimitive::UnsignedChar => 1,
-                    CPrimitive::Short => 2,
-                    CPrimitive::UnsignedShort => 2,
-                    CPrimitive::Int => WORD_SIZE,
-                    CPrimitive::UnsignedInt => WORD_SIZE,
-                    CPrimitive::Long => WORD_SIZE,
-                    CPrimitive::UnsignedLong => WORD_SIZE,
-                    CPrimitive::LongLong => 8,
-                    CPrimitive::UnsignedLongLong => 8,
-                    CPrimitive::Float => 2,
-                    CPrimitive::Double => 4,
-                    CPrimitive::LongDouble => 4,
-                },
+                CConcreteType::Primitive(primitive) => self.sizeof_primitive(primitive),
+                CConcreteType::Void => 0,
             },
         };
 
         self.ctype_size_cache.borrow_mut().insert(ctype, size);
         size
+    }
+
+    fn sizeof_primitive(&self, primitive: CPrimitive) -> u32 {
+        match primitive {
+            CPrimitive::Bool => 1,
+            CPrimitive::Char => 1,
+            CPrimitive::SignedChar => 1,
+            CPrimitive::UnsignedChar => 1,
+            CPrimitive::Short => 2,
+            CPrimitive::UnsignedShort => 2,
+            CPrimitive::Int => WORD_SIZE,
+            CPrimitive::UnsignedInt => WORD_SIZE,
+            CPrimitive::Long => WORD_SIZE,
+            CPrimitive::UnsignedLong => WORD_SIZE,
+            CPrimitive::LongLong => 8,
+            CPrimitive::UnsignedLongLong => 8,
+            CPrimitive::Float => 2,
+            CPrimitive::Double => 4,
+            CPrimitive::LongDouble => 4,
+        }
+    }
+
+    /// Obtain the most specific common type between `a` and `b`, if one exists.
+    fn common_ctype(&self, a: &CType, b: &CType) -> anyhow::Result<CType> {
+        if a == b {
+            return Ok(*a);
+        }
+
+        match (a, b) {
+            (CType::PointerTo(a_inner, None), CType::PointerTo(b_inner, None)) => {
+                match (
+                    self.program.is_generic_pointer(*a),
+                    self.program.is_generic_pointer(*b),
+                ) {
+                    // Either will do.
+                    (true, true) => Ok(*a),
+
+                    // Take the non-generic (a).
+                    (false, true) => Ok(*a),
+
+                    // Take the non-generic (b).
+                    (true, false) => Ok(*b),
+
+                    // No overlap between these types.
+                    (false, false) => bail!(
+                        "No overlap between pointer types `{}` and `{}`",
+                        self.program.format_ctype(*a),
+                        self.program.format_ctype(*b)
+                    ),
+                }
+            }
+
+            (
+                CType::AsIs(CConcreteType::Primitive(a_primitive)),
+                CType::AsIs(CConcreteType::Primitive(b_primitive)),
+            ) => Ok(self
+                .common_real_primitive(*a_primitive, *b_primitive)
+                .into()),
+
+            _ => bail!(
+                "No overlap between types {} and {}",
+                self.program.format_ctype(*a),
+                self.program.format_ctype(*b)
+            ),
+        }
+    }
+
+    fn rank_of_primitive(&self, primitive: CPrimitive) -> u32 {
+        if primitive == CPrimitive::Bool {
+            return 0;
+        }
+
+        self.sizeof_primitive(primitive)
+    }
+
+    /// Obtain a common primitive type from the given primitives `a` and `b` which can most
+    /// adequately represent the range of values the input types can hold.
+    fn common_real_primitive(&self, a: CPrimitive, b: CPrimitive) -> CPrimitive {
+        let (promoted_a, promoted_b) = match (a.is_floating_type(), b.is_floating_type()) {
+            // Pass through to picking the larger float type.
+            (true, true) => (a, b),
+
+            // Convert the integer to a float.
+            (true, false) => (a, a),
+            (false, true) => (b, b),
+
+            // Both are integers, promote!
+            (false, false) => (self.promote_integer(a), self.promote_integer(b)),
+        };
+
+        if self.rank_of_primitive(promoted_a) > self.rank_of_primitive(promoted_b) {
+            promoted_a
+        } else {
+            promoted_b
+        }
+    }
+
+    /// Promote an integer type up to `int` or `unsigned int`, if its rank is lower, or preserve the
+    /// given type should its rank exceed either of those.
+    fn promote_integer(&self, integer: CPrimitive) -> CPrimitive {
+        assert!(
+            integer.is_integer_type(),
+            "Shouldn't pass a non-integer primitive type to promotion"
+        );
+
+        if self.rank_of_primitive(integer) < self.rank_of_primitive(CPrimitive::Int) {
+            match self.is_signed_primitive(integer) {
+                true => CPrimitive::Int,
+                false => CPrimitive::UnsignedInt,
+            }
+        } else {
+            integer
+        }
+    }
+
+    /// Return whether the given primitive is a signed type on this platform.
+    fn is_signed_primitive(&self, primitive: CPrimitive) -> bool {
+        match primitive {
+            CPrimitive::Char
+            | CPrimitive::SignedChar
+            | CPrimitive::Short
+            | CPrimitive::Int
+            | CPrimitive::Long
+            | CPrimitive::LongLong
+            | CPrimitive::Float
+            | CPrimitive::Double
+            | CPrimitive::LongDouble => true,
+
+            CPrimitive::Bool
+            | CPrimitive::UnsignedChar
+            | CPrimitive::UnsignedShort
+            | CPrimitive::UnsignedInt
+            | CPrimitive::UnsignedLong
+            | CPrimitive::UnsignedLongLong => false,
+        }
     }
 }
 
@@ -244,6 +330,12 @@ enum CTypeOrId {
 impl From<CType> for CTypeOrId {
     fn from(value: CType) -> Self {
         CTypeOrId::CType(value)
+    }
+}
+
+impl From<CPrimitive> for CTypeOrId {
+    fn from(value: CPrimitive) -> Self {
+        CTypeOrId::CType(CType::AsIs(CConcreteType::Primitive(value)))
     }
 }
 

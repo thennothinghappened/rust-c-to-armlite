@@ -13,8 +13,21 @@ id_type!(CFuncTypeId);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CType {
     AsIs(CConcreteType),
-    PointerTo(CTypeId),
-    ArrayOf(CTypeId, u32),
+    PointerTo(CTypeId, Option<u32>),
+}
+
+impl CType {
+    pub const fn pointer_to(id: CTypeId) -> CType {
+        CType::PointerTo(id, None)
+    }
+
+    pub const fn array_of(id: CTypeId, size: u32) -> CType {
+        CType::PointerTo(id, Some(size))
+    }
+
+    pub const fn is_pointer(&self) -> bool {
+        matches!(self, CType::PointerTo(_, _))
+    }
 }
 
 /// A "final" type, which represents a built-in numeric type, struct, or enum. The latter two may be
@@ -25,11 +38,35 @@ pub enum CConcreteType {
     Enum(CEnumId),
     Func(CFuncTypeId),
     Primitive(CPrimitive),
+    Void,
+}
+
+impl CConcreteType {
+    pub const fn unsigned(self) -> Option<Self> {
+        let CConcreteType::Primitive(primitive) = self else {
+            return None;
+        };
+
+        match primitive.unsigned() {
+            Some(unsigned) => Some(Self::Primitive(unsigned)),
+            None => None,
+        }
+    }
+
+    pub const fn signed(self) -> Option<Self> {
+        let CConcreteType::Primitive(primitive) = self else {
+            return None;
+        };
+
+        match primitive.signed() {
+            Some(signed) => Some(Self::Primitive(signed)),
+            None => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CPrimitive {
-    Void,
     Bool,
     Char,
     SignedChar,
@@ -71,6 +108,37 @@ impl CPrimitive {
             _ => None,
         }
     }
+
+    pub const fn is_integer_type(self) -> bool {
+        match self {
+            CPrimitive::Bool => true,
+            CPrimitive::Char => true,
+            CPrimitive::SignedChar => true,
+            CPrimitive::UnsignedChar => true,
+            CPrimitive::Short => true,
+            CPrimitive::UnsignedShort => true,
+            CPrimitive::Int => true,
+            CPrimitive::UnsignedInt => true,
+            CPrimitive::Long => true,
+            CPrimitive::UnsignedLong => true,
+            CPrimitive::LongLong => true,
+            CPrimitive::UnsignedLongLong => true,
+            CPrimitive::Float => false,
+            CPrimitive::Double => false,
+            CPrimitive::LongDouble => false,
+        }
+    }
+
+    pub const fn is_floating_type(self) -> bool {
+        matches!(
+            self,
+            CPrimitive::Float | CPrimitive::Double | CPrimitive::LongDouble
+        )
+    }
+
+    pub const fn is_real_type(self) -> bool {
+        self.is_integer_type() | self.is_floating_type()
+    }
 }
 
 impl Display for CPrimitive {
@@ -79,7 +147,6 @@ impl Display for CPrimitive {
             f,
             "{}",
             match self {
-                CPrimitive::Void => "void",
                 CPrimitive::Bool => "bool",
                 CPrimitive::Char => "char",
                 CPrimitive::SignedChar => "signed char",

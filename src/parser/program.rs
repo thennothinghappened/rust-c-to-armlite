@@ -75,7 +75,7 @@ impl Program {
 
     pub fn pointer_to(&self, ctype: impl Into<CType>) -> CType {
         let ctype = ctype.into();
-        CType::PointerTo(self.ctype_id_of(ctype))
+        CType::pointer_to(self.ctype_id_of(ctype))
     }
 
     pub fn declare_named_struct(
@@ -197,6 +197,19 @@ impl Program {
         id
     }
 
+    /// Return whether the given C type is a generic pointer type (`char*` or `void*`), which can be
+    /// cast to/from any other pointer type.
+    pub fn is_generic_pointer(&self, ctype: impl Into<CType>) -> bool {
+        let CType::PointerTo(inner_id, _) = ctype.into() else {
+            return false;
+        };
+
+        matches!(
+            self.get_ctype(inner_id),
+            CType::AsIs(CConcreteType::Primitive(CPrimitive::Char) | CConcreteType::Void)
+        )
+    }
+
     pub fn get_defined_functions(&self) -> impl Iterator<Item = (&str, &CFunc)> {
         self.global_symbols
             .iter()
@@ -253,13 +266,14 @@ impl Program {
                 }
 
                 CConcreteType::Primitive(cbuiltin_type) => format!("{cbuiltin_type}"),
+                CConcreteType::Void => "void".to_string(),
             },
 
-            CType::PointerTo(ctype_id) => {
+            CType::PointerTo(ctype_id, None) => {
                 format!("{}*", self.format_ctype(self.get_ctype(ctype_id)))
             }
 
-            CType::ArrayOf(ctype_id, length) => {
+            CType::PointerTo(ctype_id, Some(length)) => {
                 format!("{}[{length}]", self.format_ctype(self.get_ctype(ctype_id)))
             }
         }
