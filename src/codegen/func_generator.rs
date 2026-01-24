@@ -495,6 +495,21 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.copy_dword(*value, destination.location);
             }
 
+            Expr::NullPtr => match destination.ctype {
+                CType::AsIs(CConcreteType::Void) => (),
+
+                CType::AsIs(CConcreteType::Primitive(CPrimitive::Bool)) => {
+                    self.b.copy_byte(0, destination.location)
+                }
+
+                CType::PointerTo(_, None) => self.b.copy_dword(0, destination.location),
+
+                _ => bail!(
+                    "Can't assign {} to nullptr",
+                    self.generator.program.format_ctype(destination.ctype)
+                ),
+            },
+
             Expr::Reference(name) => {
                 if let Some(source) = self.get_localvar(name) {
                     self.b.header(format!(
@@ -937,6 +952,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 Expr::StringLiteral(_) => bail!("A string is not an assignment target"),
                 Expr::IntLiteral(_) => bail!("A number is not an assignment target"),
                 Expr::Call(_) => bail!("A function call is not an assignment target"),
+                Expr::NullPtr => bail!("nullptr is not an assignment target"),
 
                 Expr::Reference(name) => {
                     if let Some(local) = self.get_localvar(name) {
@@ -1213,6 +1229,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         match expr {
             Expr::StringLiteral(_) => Ok(self.generator.program.pointer_to(CPrimitive::Char)),
             Expr::IntLiteral(_) => Ok(CPrimitive::Int.into()),
+            Expr::NullPtr => Ok(self.generator.program.pointer_to(CConcreteType::Void)),
 
             Expr::Reference(name) => {
                 if let Some(local) = self.get_localvar(name) {

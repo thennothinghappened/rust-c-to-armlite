@@ -293,6 +293,7 @@ impl<'a> Lexer<'a> {
                 "const" => Some(TokenKind::Const),
                 "extern" => Some(TokenKind::Extern),
                 "__asm__" => Some(TokenKind::Asm),
+                "nullptr" => Some(TokenKind::NullPtr),
                 _ => None,
             } {
                 return token;

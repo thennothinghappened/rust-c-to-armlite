@@ -6,9 +6,19 @@
 
 int PrintFormatted(char *format, int *argsArray)
 {
+	if (format == NULL)
+	{
+		Panic("PrintFormatted :: Passed NULL as format specifier");
+	}
+
+	if (argsArray == NULL)
+	{
+		Panic("PrintFormatted :: Passed NULL as argument array pointer");
+	}
+
 	size_t argIndex = 0;
 	size_t charIndex = 0;
-	
+
 	while (1)
 	{
 		char c = format[charIndex];

@@ -1,5 +1,6 @@
 
 #pragma once
+#define NULL nullptr
 
 typedef unsigned long ptrdiff_t;
 typedef void* nullptr_t;

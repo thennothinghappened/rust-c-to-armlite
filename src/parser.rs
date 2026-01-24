@@ -560,6 +560,11 @@ impl<'a> Parser<'a> {
                 Ok(Expr::IntLiteral(int))
             }
 
+            TokenKind::NullPtr => {
+                self.next();
+                Ok(Expr::NullPtr)
+            }
+
             TokenKind::OpenParen => self.parse_expr_in_brackets(),
 
             _ => Err(self.unexpected_token()),

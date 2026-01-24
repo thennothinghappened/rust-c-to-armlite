@@ -8,6 +8,7 @@ pub mod call;
 pub enum Expr {
     StringLiteral(String),
     IntLiteral(i32),
+    NullPtr,
     Reference(String),
     Call(Call),
     BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
@@ -121,6 +122,8 @@ impl Display for Expr {
             Expr::StringLiteral(content) => write!(f, "\"{content}\""),
 
             Expr::IntLiteral(int) => write!(f, "{int}"),
+
+            Expr::NullPtr => write!(f, "nullptr"),
 
             Expr::Reference(var_name) => write!(f, "{var_name}"),
 
