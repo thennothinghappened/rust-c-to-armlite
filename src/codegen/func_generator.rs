@@ -528,28 +528,30 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     bail!("Reference to undefined variable `{name}`");
                 };
 
+                let reg = self.reg();
+
                 match symbol {
                     Symbol::Func(cfunc) => {
-                        let reg = self.reg();
-
                         self.b.asm(format!("MOV {reg}, fn_{name}"));
-                        self.b.copy_dword(reg, destination.location);
-
-                        self.release_reg(reg);
+                        self.copy_lvalue(
+                            TypedLocation::new(
+                                CConcreteType::Func(cfunc.sig_id).into(),
+                                Address::at(reg),
+                            ),
+                            destination,
+                        )?;
                     }
 
                     Symbol::Var(var_ctype, _) => {
-                        let reg = self.reg();
-
                         self.b.asm(format!("MOV {reg}, var_{name}"));
                         self.copy_lvalue(
                             TypedLocation::new(*var_ctype, Address::at(reg)),
                             destination,
                         )?;
-
-                        self.release_reg(reg);
                     }
                 };
+
+                self.release_reg(reg);
             }
 
             Expr::Call(call) => self.generate_call(&call.target, &call.args, destination)?,
