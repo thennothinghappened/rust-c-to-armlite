@@ -7,7 +7,15 @@ use std::{
     str::Chars,
 };
 
-use crate::{codegen::arm::AsmMode, id_type::GetAndIncrement, lexer::tokenkind::IdentId};
+use crate::{
+    codegen::arm::AsmMode,
+    id_type::GetAndIncrement,
+    lexer::{
+        tokenkind::{IdentId, TokenKind},
+        Token,
+    },
+    span::Span,
+};
 
 id_type!(
     /// Unique identifier for a source file, either as the compilation root, or via an `#include`
@@ -26,7 +34,7 @@ pub(crate) struct Context<'a> {
     next_sourcemap_start_index: Cell<usize>,
 
     idents: RefCell<Vec<Rc<String>>>,
-    macros: RefCell<HashMap<String, Rc<String>>>,
+    macros: RefCell<HashMap<String, Rc<Vec<Token>>>>,
     asm_mode: AsmMode,
 }
 
@@ -44,11 +52,30 @@ impl<'a> Context<'a> {
         };
 
         // Identify this compiler.
-        this.preproc_define("__armlitec__", "1");
+        this.define_macro(
+            "__armlitec__",
+            vec![Token {
+                kind: TokenKind::IntLiteral(1),
+                span: Span { start: 0, end: 0 },
+            }],
+        );
 
         match asm_mode {
-            AsmMode::ArmLite => this.preproc_define("__armlite__", "1"),
-            AsmMode::ArmV7 => this.preproc_define("__arm__", "1"),
+            AsmMode::ArmLite => this.define_macro(
+                "__armlite__",
+                vec![Token {
+                    kind: TokenKind::IntLiteral(1),
+                    span: Span { start: 0, end: 0 },
+                }],
+            ),
+
+            AsmMode::ArmV7 => this.define_macro(
+                "__arm__",
+                vec![Token {
+                    kind: TokenKind::IntLiteral(1),
+                    span: Span { start: 0, end: 0 },
+                }],
+            ),
         };
 
         this
