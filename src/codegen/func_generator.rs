@@ -539,40 +539,15 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     }
 
                     Symbol::Var(var_ctype, _) => {
-                        match var_ctype {
-                            // FIXME FIXME FIXME: This is a copy-pasted impl of the above with
-                            // tiny changes. Really, we need a unified `Assign` implementation
-                            // which can go between *any* storage source and destinations, with
-                            // *any* types, and use it instead rather than bespoke solutions
-                            // everywhere for every single operation.
-                            CType::AsIs(cconcrete_type) => {
-                                let reg = self.reg();
+                        let reg = self.reg();
 
-                                self.b.asm(format!("MOV {reg}, var_{name}"));
-                                self.b.copy_dword(Address::at(reg), destination.location);
+                        self.b.asm(format!("MOV {reg}, var_{name}"));
+                        self.copy_lvalue(
+                            TypedLocation::new(*var_ctype, Address::at(reg)),
+                            destination,
+                        )?;
 
-                                self.release_reg(reg);
-                            }
-
-                            CType::PointerTo(ctype_id, source_size) => match destination.ctype {
-                                CType::AsIs(cconcrete_type) => {
-                                    bail!("can't cast a pointer to a value type")
-                                }
-
-                                CType::PointerTo(ctype_id, None) => {
-                                    let reg = self.reg();
-
-                                    self.b.asm(format!("MOV {reg}, var_{name}"));
-                                    self.b.copy_dword(Address::at(reg), destination.location);
-
-                                    self.release_reg(reg);
-                                }
-
-                                CType::PointerTo(ctype_id, Some(_)) => {
-                                    todo!("load array from pointer")
-                                }
-                            },
-                        }
+                        self.release_reg(reg);
                     }
                 };
             }
