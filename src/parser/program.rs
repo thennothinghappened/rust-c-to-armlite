@@ -95,18 +95,17 @@ impl Program {
             return Ok(id);
         };
 
-        if *existing_struct != cstruct {
-            if existing_struct.members.is_none() {
-                // We're giving a concrete definition to an existing opaque struct.
-                self.structs.insert(existing_id, cstruct);
-
-                return Ok(existing_id);
-            }
-
-            return Err(anyhow!("Tried to redefine struct `{name}` as `{cstruct:?}`, when it already has concrete definition `{existing_struct:?}`"));
+        if *existing_struct == cstruct {
+            return Ok(existing_id);
         }
 
-        self.create_anonymous_struct(cstruct)
+        if existing_struct.members.is_none() {
+            // We're giving a concrete definition to an existing opaque struct.
+            self.structs.insert(existing_id, cstruct);
+            return Ok(existing_id);
+        }
+
+        Err(anyhow!("Tried to redefine struct `{name}` as `{cstruct:?}`, when it already has concrete definition `{existing_struct:?}`"))
     }
 
     pub fn create_anonymous_struct(&mut self, cstruct: CStruct) -> anyhow::Result<CStructId> {
