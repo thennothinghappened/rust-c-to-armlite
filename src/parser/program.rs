@@ -5,7 +5,7 @@ use std::{
     fmt::Display,
 };
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use indexmap::IndexMap;
 use itertools::Itertools;
 use thiserror::Error;
@@ -17,7 +17,7 @@ use crate::{
             CConcreteType, CEnum, CEnumId, CFunc, CPrimitive, CSig, CSigId, CStruct, CStructId,
             CType, CTypeId, Member,
         },
-        expr::Expr,
+        expr::{BinaryOp, Expr, UnaryOp},
         statement::{Block, Variable},
     },
 };
@@ -76,8 +76,7 @@ impl Program {
     }
 
     pub fn pointer_to(&self, ctype: impl Into<CType>) -> CType {
-        let ctype = ctype.into();
-        CType::pointer_to(self.get_ctype_id(ctype))
+        CType::pointer_to(self.get_ctype_id(&ctype.into()))
     }
 
     pub fn create_struct(
@@ -179,22 +178,24 @@ impl Program {
 
     /// Define a new type upon encountering it. However, if this type has already been seen, the old
     /// type ID is returned instead.
-    pub fn get_ctype_id(&self, ctype: impl Into<CType>) -> CTypeId {
-        let actual_ctype = ctype.into();
-
+    pub fn get_ctype_id(&self, ctype: &CType) -> CTypeId {
         // Slow? probably horrendously! but hey, make it work first :P
-        if let Some(existing_id) = self.ctypes.borrow().iter().find_map(|pair| {
-            if *pair.1 == actual_ctype {
-                Some(pair.0)
-            } else {
-                None
-            }
-        }) {
+        if let Some(existing_id) =
+            self.ctypes.borrow().iter().find_map(
+                |pair| {
+                    if pair.1 == ctype {
+                        Some(pair.0)
+                    } else {
+                        None
+                    }
+                },
+            )
+        {
             return *existing_id;
         }
 
         let id = self.next_ctype_id.get_and_increment();
-        self.ctypes.borrow_mut().insert(id, actual_ctype);
+        self.ctypes.borrow_mut().insert(id, *ctype);
 
         id
     }
@@ -280,6 +281,102 @@ impl Program {
             }
         }
     }
+
+    /// Determine the type of the given expression, assuming it is valid. References to named
+    /// symbols are resolved by first querying the provided `scope`'s variables, then falling back
+    /// to our global symbol list.
+    pub fn type_of_expr(&self, scope: &impl ExecutionScope, expr: &Expr) -> anyhow::Result<CType> {
+        match expr {
+            Expr::StringLiteral(_) => Ok(self.pointer_to(CPrimitive::Char)),
+            Expr::IntLiteral(_) => Ok(CPrimitive::Int.into()),
+            Expr::NullPtr => Ok(self.pointer_to(CConcreteType::Void)),
+
+            Expr::Reference(name) => {
+                if let Some(ctype_id) = scope.variable_ctype(name) {
+                    return Ok(self.get_ctype(ctype_id));
+                }
+
+                if let Some(symbol) = self.get_symbol_by_name(name) {
+                    return match symbol {
+                        Symbol::Func(cfunc) => Ok(CType::AsIs(cfunc.sig_id.into())),
+                        Symbol::Var(ctype, _) => Ok(*ctype),
+                    };
+                }
+
+                bail!("Can't get the ctype of the undefined variable `{name}`")
+            }
+
+            Expr::Call(call) => match self.type_of_expr(scope, &call.target)? {
+                CType::AsIs(CConcreteType::Func(sig_id)) => Ok(sig_id.into()),
+                CType::AsIs(inner) => {
+                    bail!("{} is not a valid call target", self.format_ctype(inner))
+                }
+                CType::PointerTo(_, _) => {
+                    bail!("Non-function pointer is not a valid call target")
+                }
+            },
+
+            Expr::BinaryOp(op, left, right) => match op {
+                BinaryOp::AndThen => self.type_of_expr(scope, right),
+
+                BinaryOp::Assign | BinaryOp::PlusAssign | BinaryOp::MinusAssign => {
+                    self.type_of_expr(scope, left)
+                }
+
+                BinaryOp::LogicEqual(_)
+                | BinaryOp::LogicOrdering(_)
+                | BinaryOp::LogicAnd
+                | BinaryOp::LogicOr => Ok(CPrimitive::Bool.into()),
+
+                BinaryOp::Plus | BinaryOp::Minus => {
+                    let left_ctype = self.type_of_expr(scope, left);
+                    let right_ctype = self.type_of_expr(scope, right);
+
+                    todo!("numeric type implicit conversion rules")
+                }
+
+                BinaryOp::ArrayIndex => match self.type_of_expr(scope, left)? {
+                    CType::AsIs(_) => bail!("Can't index a concrete type as an array!"),
+                    CType::PointerTo(inner, _) => Ok(self.get_ctype(inner)),
+                },
+
+                BinaryOp::BitwiseLeftShift => todo!(),
+                BinaryOp::BitwiseRightShift => todo!(),
+                BinaryOp::BitwiseXor => todo!(),
+                BinaryOp::BitwiseAnd => todo!(),
+                BinaryOp::BitwiseOr => todo!(),
+            },
+
+            Expr::UnaryOp(op, expr) => match op {
+                UnaryOp::IncrementThenGet
+                | UnaryOp::GetThenIncrement
+                | UnaryOp::DecrementThenGet
+                | UnaryOp::GetThenDecrement => self.type_of_expr(scope, expr),
+
+                UnaryOp::SizeOf => Ok(CPrimitive::Int.into()),
+                UnaryOp::BooleanNot => Ok(CPrimitive::Bool.into()),
+                UnaryOp::Negative => self.type_of_expr(scope, expr),
+
+                UnaryOp::AddressOf => Ok(self.pointer_to(self.type_of_expr(scope, expr)?)),
+
+                UnaryOp::Dereference => match self.type_of_expr(scope, expr)? {
+                    CType::AsIs(_) => bail!("Can't dereference a concrete type!"),
+                    CType::PointerTo(inner, _) => Ok(self.get_ctype(inner)),
+                },
+            },
+
+            // fixme: blindly accepting whatever the programmer is saying here right now! we really
+            // should define a stricter ast that simply doesn't allow invalid constructs, like
+            // casting a struct to a number, for instance.
+            Expr::Cast(expr, ctype) => Ok(*ctype),
+        }
+    }
+}
+
+pub(crate) trait ExecutionScope {
+    /// Get the ID of the type that the variable with name `name` has, or `None` if that variable
+    /// does not exist.
+    fn variable_ctype(&self, name: &str) -> Option<CTypeId>;
 }
 
 impl Display for Program {

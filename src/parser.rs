@@ -216,7 +216,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::CloseSquare)?;
 
             this_type = CType::array_of(
-                self.program.get_ctype_id(this_type),
+                self.program.get_ctype_id(&this_type),
                 element_count
                     .try_into()
                     .expect("must be a positive array size"),
@@ -578,7 +578,7 @@ impl<'a> Parser<'a> {
         let name = self.consume_ident()?.to_string();
 
         self.program
-            .create_type_alias(name, self.program.get_ctype_id(pointer_type))
+            .create_type_alias(name, self.program.get_ctype_id(&pointer_type))
             .map_err(|err| self.bad_definition(Span::at(0), err))?;
 
         self.expect(TokenKind::Semicolon)?;

@@ -18,7 +18,7 @@ use crate::{
         ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType},
         expr::{call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
         statement::{Block, Statement},
-        Symbol,
+        ExecutionScope, Symbol,
     },
 };
 
@@ -1255,99 +1255,17 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     }
 
     fn type_of_expr(&self, expr: &Expr) -> anyhow::Result<CType> {
-        match expr {
-            Expr::StringLiteral(_) => Ok(self.generator.program.pointer_to(CPrimitive::Char)),
-            Expr::IntLiteral(_) => Ok(CPrimitive::Int.into()),
-            Expr::NullPtr => Ok(self.generator.program.pointer_to(CConcreteType::Void)),
+        self.generator.program.type_of_expr(self, expr)
+    }
+}
 
-            Expr::Reference(name) => {
-                if let Some(local) = self.get_localvar(name) {
-                    return Ok(local.ctype);
-                }
-
-                for arg in &self.b.sig.args {
-                    if arg.name.as_ref() == Some(name) {
-                        return Ok(arg.ctype);
-                    }
-                }
-
-                if let Some(symbol) = self.generator.program.get_symbol_by_name(name) {
-                    return match symbol {
-                        Symbol::Func(cfunc) => Ok(CType::AsIs(cfunc.sig_id.into())),
-                        Symbol::Var(ctype, _) => Ok(*ctype),
-                    };
-                }
-
-                bail!("Can't get the ctype of the undefined variable `{name}`")
-            }
-
-            Expr::Call(call) => match self.type_of_expr(&call.target)? {
-                CType::AsIs(CConcreteType::Func(sig_id)) => Ok(sig_id.into()),
-                CType::AsIs(inner) => bail!(
-                    "{} is not a valid call target",
-                    self.generator.program.format_ctype(inner)
-                ),
-                CType::PointerTo(_, _) => {
-                    bail!("Non-function pointer is not a valid call target")
-                }
-            },
-
-            Expr::BinaryOp(op, left, right) => match op {
-                BinaryOp::AndThen => self.type_of_expr(right),
-
-                BinaryOp::Assign | BinaryOp::PlusAssign | BinaryOp::MinusAssign => {
-                    self.type_of_expr(left)
-                }
-
-                BinaryOp::LogicEqual(_)
-                | BinaryOp::LogicOrdering(_)
-                | BinaryOp::LogicAnd
-                | BinaryOp::LogicOr => Ok(CPrimitive::Bool.into()),
-
-                BinaryOp::Plus | BinaryOp::Minus => {
-                    let left_ctype = self.type_of_expr(left);
-                    let right_ctype = self.type_of_expr(right);
-
-                    todo!("numeric type implicit conversion rules")
-                }
-
-                BinaryOp::ArrayIndex => match self.type_of_expr(left)? {
-                    CType::AsIs(_) => bail!("Can't index a concrete type as an array!"),
-                    CType::PointerTo(inner, _) => Ok(self.generator.program.get_ctype(inner)),
-                },
-
-                BinaryOp::BitwiseLeftShift => todo!(),
-                BinaryOp::BitwiseRightShift => todo!(),
-                BinaryOp::BitwiseXor => todo!(),
-                BinaryOp::BitwiseAnd => todo!(),
-                BinaryOp::BitwiseOr => todo!(),
-            },
-
-            Expr::UnaryOp(op, expr) => match op {
-                UnaryOp::IncrementThenGet
-                | UnaryOp::GetThenIncrement
-                | UnaryOp::DecrementThenGet
-                | UnaryOp::GetThenDecrement => self.type_of_expr(expr),
-
-                UnaryOp::SizeOf => Ok(CPrimitive::Int.into()),
-                UnaryOp::BooleanNot => Ok(CPrimitive::Bool.into()),
-                UnaryOp::Negative => self.type_of_expr(expr),
-
-                UnaryOp::AddressOf => {
-                    Ok(self.generator.program.pointer_to(self.type_of_expr(expr)?))
-                }
-
-                UnaryOp::Dereference => match self.type_of_expr(expr)? {
-                    CType::AsIs(_) => bail!("Can't dereference a concrete type!"),
-                    CType::PointerTo(inner, _) => Ok(self.generator.program.get_ctype(inner)),
-                },
-            },
-
-            // fixme: blindly accepting whatever the programmer is saying here right now! we really
-            // should define a stricter ast that simply doesn't allow invalid constructs, like
-            // casting a struct to a number, for instance.
-            Expr::Cast(expr, ctype) => Ok(*ctype),
-        }
+impl<'a, 'b> ExecutionScope for FuncGenerator<'a, 'b> {
+    fn variable_ctype(&self, name: &str) -> Option<crate::parser::program::ctype::CTypeId> {
+        Some(
+            self.generator
+                .program
+                .get_ctype_id(&self.get_localvar(name)?.ctype),
+        )
     }
 }
 
