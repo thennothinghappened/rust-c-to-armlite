@@ -1260,12 +1260,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 }
 
 impl<'a, 'b> ExecutionScope for FuncGenerator<'a, 'b> {
-    fn variable_ctype(&self, name: &str) -> Option<crate::parser::program::ctype::CTypeId> {
-        Some(
-            self.generator
-                .program
-                .get_ctype_id(&self.get_localvar(name)?.ctype),
-        )
+    fn variable_ctype(&self, name: &str) -> Option<CType> {
+        Some(self.get_localvar(name)?.ctype)
     }
 }
 

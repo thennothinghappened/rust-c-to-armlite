@@ -292,8 +292,8 @@ impl Program {
             Expr::NullPtr => Ok(self.pointer_to(CConcreteType::Void)),
 
             Expr::Reference(name) => {
-                if let Some(ctype_id) = scope.variable_ctype(name) {
-                    return Ok(self.get_ctype(ctype_id));
+                if let Some(ctype) = scope.variable_ctype(name) {
+                    return Ok(ctype);
                 }
 
                 if let Some(symbol) = self.get_symbol_by_name(name) {
@@ -374,9 +374,9 @@ impl Program {
 }
 
 pub(crate) trait ExecutionScope {
-    /// Get the ID of the type that the variable with name `name` has, or `None` if that variable
-    /// does not exist.
-    fn variable_ctype(&self, name: &str) -> Option<CTypeId>;
+    /// Get the type that the variable with name `name` has, or `None` if that variable does not
+    /// exist.
+    fn variable_ctype(&self, name: &str) -> Option<CType>;
 }
 
 impl Display for Program {

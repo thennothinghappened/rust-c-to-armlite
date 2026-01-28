@@ -153,7 +153,7 @@ impl<'a> Parser<'a> {
 
             // May or may not have function body.
             if self.next_is(TokenKind::OpenCurly) {
-                func.body = CFuncBody::Defined(self.parse_block()?);
+                func.body = CFuncBody::Defined(self.parse_block(BlockBuilder::new())?);
                 self.program.create_function(name, func).unwrap();
             } else {
                 self.expect(TokenKind::Semicolon)?;
@@ -262,13 +262,11 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
-    fn parse_block(&mut self) -> Result<Block, ParseError> {
+    fn parse_block(&mut self, mut scope: BlockBuilder) -> Result<Block, ParseError> {
         let mut statements: Vec<Statement> = Vec::new();
 
         self.expect(TokenKind::OpenCurly)?;
         self.consume_semicolons();
-
-        let mut scope = BlockBuilder::new();
 
         loop {
             self.consume_semicolons();
@@ -288,7 +286,9 @@ impl<'a> Parser<'a> {
 
     fn parse_statement(&mut self, scope: &mut BlockBuilder) -> Result<Statement, ParseError> {
         match self.peek().kind {
-            TokenKind::OpenCurly => Ok(self.parse_block()?.into()),
+            TokenKind::OpenCurly => {
+                scope.with_child_scope(|scope| Ok(self.parse_block(scope)?.into()))
+            }
 
             TokenKind::If => {
                 self.next();
