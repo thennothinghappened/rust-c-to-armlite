@@ -8,7 +8,7 @@ use crate::{
 id_type!(CTypeId);
 id_type!(CStructId);
 id_type!(CEnumId);
-id_type!(CFuncTypeId);
+id_type!(CSigId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CType {
@@ -36,7 +36,7 @@ impl CType {
 pub enum CConcreteType {
     Struct(CStructId),
     Enum(CEnumId),
-    Func(CFuncTypeId),
+    Func(CSigId),
     Primitive(CPrimitive),
     Void,
 }
@@ -185,8 +185,8 @@ impl From<CEnumId> for CConcreteType {
     }
 }
 
-impl From<CFuncTypeId> for CConcreteType {
-    fn from(value: CFuncTypeId) -> Self {
+impl From<CSigId> for CConcreteType {
+    fn from(value: CSigId) -> Self {
         Self::Func(value)
     }
 }
@@ -203,14 +203,14 @@ impl From<CPrimitive> for CType {
     }
 }
 
-impl From<CFuncTypeId> for CType {
-    fn from(value: CFuncTypeId) -> Self {
+impl From<CSigId> for CType {
+    fn from(value: CSigId) -> Self {
         Self::AsIs(CConcreteType::Func(value))
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CFuncType {
+pub struct CSig {
     pub args: Vec<Member>,
     pub returns: CType,
     pub is_noreturn: bool,
@@ -218,7 +218,7 @@ pub struct CFuncType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CFunc {
-    pub sig_id: CFuncTypeId,
+    pub sig_id: CSigId,
     pub body: CFuncBody,
     pub is_raw_assembly: bool,
 }
@@ -253,10 +253,3 @@ pub struct CEnum {
 }
 
 pub type EnumMember = (String, i32);
-
-/// A type definition, which aliases the given `name` to reference the `target_type`.
-#[derive(Debug)]
-pub struct TypeDef {
-    pub name: String,
-    pub ctype: CType,
-}

@@ -8,8 +8,7 @@ use crate::{
         block_builder::BlockBuilder,
         program::{
             ctype::{
-                CConcreteType, CFunc, CFuncBody, CFuncType, CFuncTypeId, CPrimitive, CStruct,
-                CType, Member, TypeDef,
+                CConcreteType, CFunc, CFuncBody, CPrimitive, CSig, CSigId, CStruct, CType, Member,
             },
             expr::{call::Call, BinaryOp, BindingPower, CompareMode, Expr, OrderMode, UnaryOp},
             statement::{Block, Statement, Variable},
@@ -60,7 +59,7 @@ impl<'a> Parser<'a> {
 
                     match statement {
                         Statement::Declare(variable) => {
-                            self.program.declare_global_var(variable).unwrap();
+                            self.program.create_global_variable(variable).unwrap();
                         }
 
                         _ => panic!("Invalid top-level statement {statement:?}"),
@@ -134,7 +133,7 @@ impl<'a> Parser<'a> {
             let args = self.parse_func_decl_args()?;
 
             let mut func = CFunc {
-                sig_id: self.program.func_type(CFuncType {
+                sig_id: self.program.get_signature_id(CSig {
                     args,
                     returns: return_ctype,
                     is_noreturn,
@@ -149,13 +148,13 @@ impl<'a> Parser<'a> {
 
             // Pre-declare the function w/o body, so it is available for recursion.
             self.program
-                .declare_function(name.clone(), func.clone())
+                .create_function(name.clone(), func.clone())
                 .unwrap();
 
             // May or may not have function body.
             if self.next_is(TokenKind::OpenCurly) {
                 func.body = CFuncBody::Defined(self.parse_block()?);
-                self.program.declare_function(name, func).unwrap();
+                self.program.create_function(name, func).unwrap();
             } else {
                 self.expect(TokenKind::Semicolon)?;
             };
@@ -189,7 +188,7 @@ impl<'a> Parser<'a> {
 
                 let args = self.parse_func_decl_args()?;
 
-                this_type = CType::AsIs(CConcreteType::Func(self.program.func_type(CFuncType {
+                this_type = CType::AsIs(CConcreteType::Func(self.program.get_signature_id(CSig {
                     args,
                     returns: self.program.get_ctype(return_ctype_id),
                     is_noreturn: false,
@@ -217,7 +216,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::CloseSquare)?;
 
             this_type = CType::array_of(
-                self.program.ctype_id_of(this_type),
+                self.program.get_ctype_id(this_type),
                 element_count
                     .try_into()
                     .expect("must be a positive array size"),
@@ -578,13 +577,8 @@ impl<'a> Parser<'a> {
         let pointer_type = self.parse_type_pointersssss(initial_type)?;
         let name = self.consume_ident()?.to_string();
 
-        let typedef = TypeDef {
-            name,
-            ctype: pointer_type,
-        };
-
         self.program
-            .typedef(typedef)
+            .create_type_alias(name, self.program.get_ctype_id(pointer_type))
             .map_err(|err| self.bad_definition(Span::at(0), err))?;
 
         self.expect(TokenKind::Semicolon)?;
@@ -606,7 +600,7 @@ impl<'a> Parser<'a> {
             // Opaque struct.
             return self
                 .program
-                .declare_named_struct(struct_name, CStruct::opaque())
+                .create_struct(struct_name, CStruct::opaque())
                 .map(|id| CType::AsIs(id.into()))
                 .map_err(|err| self.bad_definition(start.until(self.lexer.index), err));
         }
@@ -634,7 +628,7 @@ impl<'a> Parser<'a> {
             Some(name) => {
                 let id = self
                     .program
-                    .declare_named_struct(name, builder.build())
+                    .create_struct(name, builder.build())
                     .map_err(|err| self.bad_definition(start.until(self.lexer.index), err))?;
 
                 Ok(CType::AsIs(id.into()))
@@ -642,7 +636,7 @@ impl<'a> Parser<'a> {
 
             None => Ok(CType::AsIs(
                 self.program
-                    .declare_named_struct("".to_owned(), builder.build())
+                    .create_struct("".to_owned(), builder.build())
                     .map_err(|err| self.bad_definition(start.until(self.lexer.index), err))?
                     .into(),
             )),
@@ -664,7 +658,7 @@ impl<'a> Parser<'a> {
                 self.next();
 
                 self.program
-                    .resolve_typedef(&self.lexer.context.get_ident(id))
+                    .get_type_alias_by_name(&self.lexer.context.get_ident(id))
                     .ok_or_else(|| self.unexpected_token())
             }
 

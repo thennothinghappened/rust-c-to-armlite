@@ -20,7 +20,7 @@ use crate::{
     },
     context::Context,
     parser::program::{
-        ctype::{CConcreteType, CFunc, CFuncBody, CFuncType, CPrimitive, CType, CTypeId},
+        ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CSig, CType, CTypeId},
         expr::{call::Call, BinaryOp, Expr, UnaryOp},
         statement::{Block, Statement, Variable},
         Program, Symbol,
@@ -50,7 +50,7 @@ impl Generator {
     pub fn generate(self) -> String {
         self.file_builder.create_function(
             "start",
-            &CFuncType {
+            &CSig {
                 args: vec![],
                 returns: CConcreteType::Void.into(),
                 is_noreturn: true,
@@ -90,10 +90,10 @@ impl Generator {
 
         for (name, cfunc) in self
             .program
-            .get_defined_functions()
+            .get_functions()
             .filter(|(_, cfunc)| !matches!(cfunc.body, CFuncBody::Extern))
         {
-            let sig = self.program.get_cfunc_sig(cfunc.sig_id);
+            let sig = self.program.get_signature(cfunc.sig_id);
 
             self.file_builder.create_function(name, sig, |b| {
                 if !b.sig.args.is_empty() {

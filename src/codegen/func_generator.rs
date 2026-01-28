@@ -241,7 +241,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         if self
             .generator
             .program
-            .get_cfunc_sig(cfunc.sig_id)
+            .get_signature(cfunc.sig_id)
             .is_noreturn
         {
             return Ok(());
@@ -524,7 +524,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(());
                 }
 
-                let Some(symbol) = self.generator.program.get_symbol(name) else {
+                let Some(symbol) = self.generator.program.get_symbol_by_name(name) else {
                     bail!("Reference to undefined variable `{name}`");
                 };
 
@@ -829,7 +829,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             bail!("bad call target!");
         };
 
-        let sig = self.generator.program.get_cfunc_sig(sig_id);
+        let sig = self.generator.program.get_signature(sig_id);
 
         // push args to stack first. caller pushes args, callee expected to pop em. args
         // pushed last first, so top of stack is the first argument.
@@ -1271,7 +1271,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     }
                 }
 
-                if let Some(symbol) = self.generator.program.get_symbol(name) {
+                if let Some(symbol) = self.generator.program.get_symbol_by_name(name) {
                     return match symbol {
                         Symbol::Func(cfunc) => Ok(CType::AsIs(cfunc.sig_id.into())),
                         Symbol::Var(ctype, _) => Ok(*ctype),

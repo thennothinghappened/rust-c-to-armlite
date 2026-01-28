@@ -11,7 +11,7 @@ use crate::{
         func_builder::LabelId,
         Generator,
     },
-    parser::program::ctype::{CFunc, CFuncType},
+    parser::program::ctype::{CFunc, CSig},
 };
 
 pub(super) mod address;

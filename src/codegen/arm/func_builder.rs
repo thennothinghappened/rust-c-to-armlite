@@ -23,13 +23,13 @@ use crate::{
         WORD_SIZE,
     },
     id_type::GetAndIncrement,
-    parser::program::ctype::CFuncType,
+    parser::program::ctype::CSig,
 };
 
 id_type!(LabelId);
 
 pub(crate) struct FuncBuilder<'a> {
-    pub sig: &'a CFuncType,
+    pub sig: &'a CSig,
     name: &'a str,
     instructions: Vec<Inst>,
     doc_comment: Vec<String>,
@@ -55,7 +55,7 @@ impl Default for RegStatus {
 }
 
 impl<'a> FuncBuilder<'a> {
-    pub fn new(name: &'a str, sig: &'a CFuncType, asm_mode: AsmMode) -> Self {
+    pub fn new(name: &'a str, sig: &'a CSig, asm_mode: AsmMode) -> Self {
         Self {
             doc_comment: Vec::new(),
             instructions: Vec::new(),

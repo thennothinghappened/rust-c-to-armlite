@@ -11,7 +11,7 @@ use crate::{
     id_type::{self, GetAndIncrement},
 };
 
-use crate::{codegen::func_builder::FuncBuilder, parser::program::ctype::CFuncType};
+use crate::{codegen::func_builder::FuncBuilder, parser::program::ctype::CSig};
 
 id_type!(StringId);
 
@@ -32,7 +32,7 @@ impl FileBuilder {
         }
     }
 
-    pub fn create_function<F>(&self, name: &str, sig: &CFuncType, block: F)
+    pub fn create_function<F>(&self, name: &str, sig: &CSig, block: F)
     where
         F: FnOnce(&mut FuncBuilder<'_>),
     {
