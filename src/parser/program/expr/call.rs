@@ -3,8 +3,8 @@ use std::{fmt::Display, rc::Rc};
 use itertools::Itertools;
 
 use crate::parser::program::{
+    ctype::{CFunc, CFuncType, CFuncTypeId},
     expr::Expr,
-    types::{CFunc, CFuncType, CFuncTypeId},
 };
 
 #[derive(Debug, Clone, PartialEq)]

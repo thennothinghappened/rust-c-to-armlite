@@ -15,9 +15,9 @@ use crate::{
         Generator, Reg, WORD_SIZE,
     },
     parser::program::{
+        ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType},
         expr::{call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
         statement::{Block, Statement},
-        types::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType},
         Symbol,
     },
 };

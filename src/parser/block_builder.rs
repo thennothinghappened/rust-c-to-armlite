@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::parser::program::{
+    ctype::CType,
     statement::{Block, Statement},
-    types::CType,
 };
 
 pub(super) struct BlockBuilder {

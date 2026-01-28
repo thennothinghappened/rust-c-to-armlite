@@ -11,7 +11,7 @@ use crate::{
     id_type::{self, GetAndIncrement},
 };
 
-use crate::{codegen::func_builder::FuncBuilder, parser::program::types::CFuncType};
+use crate::{codegen::func_builder::FuncBuilder, parser::program::ctype::CFuncType};
 
 id_type!(StringId);
 

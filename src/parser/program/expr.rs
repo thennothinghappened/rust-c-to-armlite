@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::parser::program::{expr::call::Call, types::CType};
+use crate::parser::program::{ctype::CType, expr::call::Call};
 
 pub mod call;
 

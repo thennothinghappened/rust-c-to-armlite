@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::parser::program::{expr::Expr, types::CType};
+use crate::parser::program::{ctype::CType, expr::Expr};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {

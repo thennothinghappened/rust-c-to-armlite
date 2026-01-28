@@ -23,7 +23,7 @@ use crate::{
         WORD_SIZE,
     },
     id_type::GetAndIncrement,
-    parser::program::types::CFuncType,
+    parser::program::ctype::CFuncType,
 };
 
 id_type!(LabelId);

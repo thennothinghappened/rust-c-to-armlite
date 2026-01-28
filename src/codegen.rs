@@ -20,9 +20,9 @@ use crate::{
     },
     context::Context,
     parser::program::{
+        ctype::{CConcreteType, CFunc, CFuncBody, CFuncType, CPrimitive, CType, CTypeId},
         expr::{call::Call, BinaryOp, Expr, UnaryOp},
         statement::{Block, Statement, Variable},
-        types::{CConcreteType, CFunc, CFuncBody, CFuncType, CPrimitive, CType, CTypeId},
         Program, Symbol,
     },
 };

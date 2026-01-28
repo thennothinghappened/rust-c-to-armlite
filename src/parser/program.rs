@@ -13,18 +13,18 @@ use thiserror::Error;
 use crate::{
     id_type::GetAndIncrement,
     parser::program::{
-        expr::Expr,
-        statement::{Block, Variable},
-        types::{
+        ctype::{
             CConcreteType, CEnum, CEnumId, CFunc, CFuncType, CFuncTypeId, CPrimitive, CStruct,
             CStructId, CType, CTypeId, Member, TypeDef,
         },
+        expr::Expr,
+        statement::{Block, Variable},
     },
 };
 
+pub mod ctype;
 pub mod expr;
 pub mod statement;
-pub mod types;
 
 #[derive(Debug, Clone)]
 pub enum Symbol {
