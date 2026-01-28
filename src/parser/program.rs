@@ -14,8 +14,8 @@ use crate::{
     id_type::GetAndIncrement,
     parser::program::{
         ctype::{
-            CConcreteType, CEnum, CEnumId, CFunc, CPrimitive, CSig, CSigId, CStruct, CStructId,
-            CType, CTypeId, Member,
+            CConcreteType, CEnum, CEnumId, CFunc, CFuncBody, CPrimitive, CSig, CSigId, CStruct,
+            CStructId, CType, CTypeId, Member,
         },
         expr::{BinaryOp, Expr, UnaryOp},
         statement::{Block, Variable},
@@ -116,8 +116,40 @@ impl Program {
     }
 
     pub fn create_function(&mut self, name: String, func: CFunc) -> Result<(), anyhow::Error> {
-        // todo: ensure we don't redefine a func wrongly (follow struct example.)
-        self.global_symbols.insert(name, Symbol::Func(func));
+        let Some(Symbol::Func(existing_cfunc)) = self.global_symbols.get(&name) else {
+            self.global_symbols.insert(name, Symbol::Func(func));
+            return Ok(());
+        };
+
+        if existing_cfunc.sig_id != func.sig_id {
+            bail!("Attempted to re-declare function `{name}` with a different signature");
+        }
+
+        match (&existing_cfunc.body, func.body) {
+            (CFuncBody::Defined(_), CFuncBody::Defined(_)) => {
+                bail!("Function `{name}` already has a body, cannot re-define it")
+            }
+
+            (CFuncBody::Defined(_), CFuncBody::Extern) => {
+                bail!("Function `{name}` cannot be defined as extern when it has a body")
+            }
+
+            (CFuncBody::Extern, CFuncBody::Defined(_)) => {
+                bail!("Function `{name}` cannot be defined when it was declared extern")
+            }
+
+            (CFuncBody::None, CFuncBody::Defined(block)) => self.set_function_body(&name, block),
+
+            _ => Ok(()),
+        }
+    }
+
+    pub fn set_function_body(&mut self, name: &str, block: Block) -> anyhow::Result<()> {
+        let Some(Symbol::Func(cfunc)) = self.global_symbols.get_mut(name) else {
+            bail!("Can't set the body of non-existing function `{name}`");
+        };
+
+        cfunc.body = CFuncBody::Defined(block);
         Ok(())
     }
 

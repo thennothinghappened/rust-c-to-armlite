@@ -132,7 +132,7 @@ impl<'a> Parser<'a> {
             // Parse args.
             let args = self.parse_func_decl_args()?;
 
-            let mut func = CFunc {
+            let func = CFunc {
                 sig_id: self.program.get_signature_id(CSig {
                     args,
                     returns: return_ctype,
@@ -153,8 +153,11 @@ impl<'a> Parser<'a> {
 
             // May or may not have function body.
             if self.next_is(TokenKind::OpenCurly) {
-                func.body = CFuncBody::Defined(self.parse_block(BlockBuilder::new())?);
-                self.program.create_function(name, func).unwrap();
+                let body = self.parse_block(BlockBuilder::new())?;
+
+                self.program
+                    .set_function_body(&name, body)
+                    .map_err(|err| self.bad_definition(Span::at(self.lexer.index), err))?;
             } else {
                 self.expect(TokenKind::Semicolon)?;
             };
