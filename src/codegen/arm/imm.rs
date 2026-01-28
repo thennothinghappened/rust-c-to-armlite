@@ -2,7 +2,7 @@ use crate::codegen::arm::file_builder::StringId;
 
 /// A constant value.
 #[derive(Clone, Copy)]
-pub(super) enum Imm {
+pub enum Imm {
     I32(i32),
     U32(u32),
     F32(f32),
