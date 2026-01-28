@@ -636,7 +636,7 @@ impl<'a> Parser<'a> {
 
             None => Ok(CType::AsIs(
                 self.program
-                    .create_struct("".to_owned(), builder.build())
+                    .create_anonymous_struct(builder.build())
                     .map_err(|err| self.bad_definition(start.until(self.lexer.index), err))?
                     .into(),
             )),

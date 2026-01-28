@@ -89,9 +89,7 @@ impl Program {
             .get(&name)
             .map(|&id| (id, self.get_struct(id)))
         else {
-            let id = self.next_struct_id.get_and_increment();
-
-            self.structs.insert(id, cstruct);
+            let id = self.create_anonymous_struct(cstruct)?;
             self.structs_by_name.insert(name, id);
 
             return Ok(id);
@@ -108,7 +106,14 @@ impl Program {
             return Err(anyhow!("Tried to redefine struct `{name}` as `{cstruct:?}`, when it already has concrete definition `{existing_struct:?}`"));
         }
 
-        Ok(existing_id)
+        self.create_anonymous_struct(cstruct)
+    }
+
+    pub fn create_anonymous_struct(&mut self, cstruct: CStruct) -> anyhow::Result<CStructId> {
+        let id = self.next_struct_id.get_and_increment();
+        self.structs.insert(id, cstruct);
+
+        Ok(id)
     }
 
     pub fn create_function(&mut self, name: String, func: CFunc) -> Result<(), anyhow::Error> {
