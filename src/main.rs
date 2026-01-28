@@ -12,7 +12,12 @@ use codespan_reporting::{
     term,
 };
 
-use crate::{codegen::arm::AsmMode, context::Context, lexer::Lexer, parser::Parser};
+use crate::{
+    codegen::arm::AsmMode,
+    context::{Context, IncludeType},
+    lexer::Lexer,
+    parser::Parser,
+};
 
 #[macro_use]
 mod id_type;
@@ -94,7 +99,9 @@ fn parse_program(
     let context = Rc::new(Context::new(asm_mode));
 
     let source_id = match file_name {
-        Some(path) => context.add_source_file_path(path).ok()?,
+        Some(path) => context
+            .add_source_file_path(path, IncludeType::Local)
+            .ok()?,
         None => context.add_source_text(text),
     };
 

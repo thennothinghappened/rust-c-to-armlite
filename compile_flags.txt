@@ -3,4 +3,6 @@
 -ffreestanding
 -nostdlib
 -nostdinc
+-Istdlib/include
+-Iinclude
 --target=arm

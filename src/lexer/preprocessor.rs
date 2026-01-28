@@ -1,6 +1,9 @@
 use std::ops::Not;
 
-use crate::lexer::{is_newline, is_valid_identifier, tokenkind::TokenKind, Lexer};
+use crate::{
+    context::IncludeType,
+    lexer::{is_newline, is_valid_identifier, tokenkind::TokenKind, Lexer},
+};
 
 impl<'a> Lexer<'a> {
     pub(super) fn preprocessor_directive(&mut self) -> TokenKind {
@@ -41,17 +44,24 @@ impl<'a> Lexer<'a> {
         // murder it once it does its job (drop)
         self.skip_whitespace();
 
-        if !self.accept_char('"') {
-            todo!("Recover from syntax error in #include directive: missing opening \"");
+        let Some((closer, include_type)) = self.maybe_map_next_char(|char| match char {
+            '<' => Some(('>', IncludeType::System)),
+            '"' => Some(('"', IncludeType::Local)),
+            _ => None,
+        }) else {
+            todo!("Recover from syntax error in #include directive: missing path opener");
+        };
+
+        let path = self.take_chars_until(|char| char == closer);
+
+        if !self.accept_char(closer) {
+            todo!("Recover from syntax error in #include directive: missing closing {closer}");
         }
 
-        let path = self.take_chars_until(|char| char == '"' || is_newline(char));
-
-        if !self.accept_char('"') {
-            todo!("Recover from syntax error in #include directive: missing closing \"");
-        }
-
-        let Ok(source_id) = self.context.add_source_file_path(path.to_owned()) else {
+        let Ok(source_id) = self
+            .context
+            .add_source_file_path(path.to_owned(), include_type)
+        else {
             return TokenKind::IncludeFileNotFound(self.context.allocate_ident(path));
         };
 

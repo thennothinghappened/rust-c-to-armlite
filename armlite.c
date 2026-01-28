@@ -1,6 +1,6 @@
 
-#include "armlite.h"
-#include "string.h"
+#include <armlite.h>
+#include <string.h>
 
 #ifndef __armlitec__
 // We're compiling in a hosted environment with libc available.

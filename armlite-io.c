@@ -1,8 +1,7 @@
 
-#pragma once
-
-#include "stddef.h"
-#include "armlite.h"
+#include <stddef.h>
+#include <armlite.h>
+#include <armlite-io.h>
 
 int PrintFormatted(char *format, int *argsArray)
 {

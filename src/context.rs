@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fs, io,
     marker::PhantomData,
+    path::{Path, PathBuf},
     rc::Rc,
     str::Chars,
 };
@@ -27,7 +28,7 @@ id_type!(
 /// to parsers for resolving identifiers.
 #[derive(Default)]
 pub(crate) struct Context<'a> {
-    sources_by_path: RefCell<HashMap<String, SourceId>>,
+    sources_by_path: RefCell<HashMap<(String, IncludeType), SourceId>>,
     sources: RefCell<HashMap<SourceId, SourceData>>,
     sources_ref_phantom: PhantomData<&'a str>,
     next_source_id: Cell<SourceId>,
@@ -42,6 +43,12 @@ struct SourceData {
     text: Box<str>,
     sourcemap_start_index: usize,
     pragma_once_enabled: bool,
+}
+
+#[derive(Eq, PartialEq, Hash, Copy, Clone)]
+pub enum IncludeType {
+    System,
+    Local,
 }
 
 impl<'a> Context<'a> {
@@ -100,15 +107,30 @@ impl<'a> Context<'a> {
         id
     }
 
-    pub(crate) fn add_source_file_path(&self, path: String) -> Result<SourceId, io::Error> {
-        if let Some(&existing_id) = self.sources_by_path.borrow().get(&path) {
+    pub(crate) fn add_source_file_path(
+        &self,
+        path: String,
+        include_type: IncludeType,
+    ) -> Result<SourceId, io::Error> {
+        let key = (path, include_type);
+
+        if let Some(&existing_id) = self.sources_by_path.borrow().get(&key) {
             return Ok(existing_id);
         }
 
-        let text = fs::read_to_string(&path)?;
-        let id = self.add_source_text(text);
+        let text = match include_type {
+            IncludeType::System => ["./stdlib/include", "./include"]
+                .iter()
+                .find_map(|system_path| {
+                    fs::read_to_string(PathBuf::from(system_path).join(&key.0)).ok()
+                })
+                .ok_or_else(io::Error::last_os_error)?,
 
-        self.sources_by_path.borrow_mut().insert(path, id);
+            IncludeType::Local => fs::read_to_string(&key.0)?,
+        };
+
+        let id = self.add_source_text(text);
+        self.sources_by_path.borrow_mut().insert(key, id);
 
         Ok(id)
     }
@@ -131,9 +153,9 @@ impl<'a> Context<'a> {
         self.sources_by_path
             .borrow()
             .iter()
-            .find_map(|entry| {
-                if *entry.1 == id {
-                    Some(entry.0.to_owned())
+            .find_map(|((entry_name, _), &entry_id)| {
+                if entry_id == id {
+                    Some(entry_name.to_owned())
                 } else {
                     None
                 }
