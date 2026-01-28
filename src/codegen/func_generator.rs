@@ -285,18 +285,18 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 if let Some(expr) = &variable.value {
                     // eval the initial val.
-                    self.get_rvalue(expr, var)?;
+                    self.eval_expression(expr, var)?;
                 }
             }
 
-            Statement::Expr(expr) => self.get_rvalue(expr, NOWHERE)?,
+            Statement::Expr(expr) => self.eval_expression(expr, NOWHERE)?,
 
             Statement::Return(expr) => {
                 let temp_storage = self.allocate_anon(self.b.sig.returns);
 
                 self.b.header("<return>");
 
-                self.get_rvalue(expr, temp_storage)?;
+                self.eval_expression(expr, temp_storage)?;
 
                 if self.generator.sizeof_ctype(temp_storage.ctype) > WORD_SIZE {
                     // the caller pushes an address where they want us to copy the returned
@@ -360,7 +360,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.header(format!("## if ({condition})"));
 
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
-                self.get_rvalue(condition, temp_condition_storage)?;
+                self.eval_expression(condition, temp_condition_storage)?;
 
                 let condition_holder = self.reg();
 
@@ -408,7 +408,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.breakable_stack.push_back(breakable);
 
                 self.b.label(loop_label);
-                self.get_rvalue(condition, temp_condition_storage)?;
+                self.eval_expression(condition, temp_condition_storage)?;
 
                 let condition_holder = self.reg();
 
@@ -462,7 +462,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
     /// Generate instructions to perform the given operation, returning the instructions required to
     /// perform it, and place the output at `[R11-#result_offset]`.
-    fn get_rvalue(
+    fn eval_expression(
         &mut self,
         expr: &Expr,
         destination: impl Into<TypedLocation>,
@@ -620,7 +620,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 }
 
                 UnaryOp::BooleanNot => {
-                    self.get_rvalue(expr, destination)?;
+                    self.eval_expression(expr, destination)?;
 
                     if destination.is_somewhere() {
                         let upon_truthy_input = self.b.create_label("BooleanNot__uponTruthyInput");
@@ -681,7 +681,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     let source_ctype = self.generator.program.get_ctype(inner_id);
 
                     let source_address_temp = self.allocate_anon(CType::pointer_to(inner_id));
-                    self.get_rvalue(expr, source_address_temp)?;
+                    self.eval_expression(expr, source_address_temp)?;
 
                     let source_address_reg = self.reg();
                     self.b.load_dword(source_address_reg, source_address_temp);
@@ -859,7 +859,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         ));
 
         for (arg, out_info) in call_args.iter().zip(&arg_target_spots) {
-            self.get_rvalue(arg, *out_info)?;
+            self.eval_expression(arg, *out_info)?;
         }
 
         match call_target {
@@ -874,7 +874,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let temp_fn_ptr_var = self.allocate_anon(CType::AsIs(CConcreteType::Func(sig_id)));
 
                 // Resolve the function pointer.
-                self.get_rvalue(expr, temp_fn_ptr_var)?;
+                self.eval_expression(expr, temp_fn_ptr_var)?;
 
                 let reg = self.reg();
                 self.b.load_dword(reg, temp_fn_ptr_var);
@@ -922,8 +922,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     ) -> anyhow::Result<()> {
         match op {
             BinaryOp::AndThen => {
-                self.get_rvalue(left, NOWHERE)?;
-                self.get_rvalue(right, destination)?;
+                self.eval_expression(left, NOWHERE)?;
+                self.eval_expression(right, destination)?;
             }
             BinaryOp::Assign => match left {
                 Expr::StringLiteral(_) => bail!("A string is not an assignment target"),
@@ -933,7 +933,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 Expr::Reference(name) => {
                     if let Some(local) = self.get_localvar(name) {
-                        self.get_rvalue(right, local)?;
+                        self.eval_expression(right, local)?;
 
                         if destination.is_somewhere() {
                             todo!("assign-and-return")
@@ -945,12 +945,60 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     bail!("Bad assignment target: undeclared variable `{name}`")
                 }
 
+                Expr::BinaryOp(BinaryOp::ArrayIndex, target_expr, index_expr) => {
+                    let CType::PointerTo(element_ctype_id, _) = self.type_of_expr(target_expr)?
+                    else {
+                        bail!("Cannot dereference `{target_expr}`, which is not a pointer");
+                    };
+
+                    let (element_ctype, ele_pointer) =
+                        self.calculate_element_address(target_expr, index_expr)?;
+
+                    self.eval_expression(
+                        right,
+                        Address::at(ele_pointer).with_ctype(element_ctype),
+                    )?;
+
+                    self.release_reg(ele_pointer);
+                }
+
+                Expr::UnaryOp(UnaryOp::Dereference, target) => {
+                    let CType::PointerTo(element_ctype_id, _) = self.type_of_expr(target)? else {
+                        bail!("Cannot dereference `{target}`, which is not a pointer");
+                    };
+
+                    let pointer_ctype = CType::pointer_to(element_ctype_id);
+
+                    let pointer_holder = self.allocate_anon(pointer_ctype);
+                    self.eval_expression(target, pointer_holder)?;
+
+                    let pointer_reg = self.reg();
+
+                    self.copy_lvalue(
+                        pointer_holder,
+                        TypedLocation::new(pointer_ctype, pointer_reg),
+                    )?;
+
+                    self.free_local(pointer_holder);
+
+                    self.eval_expression(
+                        right,
+                        TypedLocation::new(
+                            self.generator.program.get_ctype(element_ctype_id),
+                            Address::at(pointer_reg),
+                        ),
+                    )?;
+
+                    self.release_reg(pointer_reg);
+                }
+
                 Expr::BinaryOp(binary_op, expr, expr1) => {
                     todo!("Assignment target result of BinaryOp")
                 }
                 Expr::UnaryOp(unary_op, expr) => {
                     todo!("Assignment target result of UnaryOp")
                 }
+
                 Expr::Cast(expr, ctype) => todo!("Cast assignment target >:("),
             },
 
@@ -975,8 +1023,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let left_temp = self.allocate_anon(common_ctype);
                 let right_temp = self.allocate_anon(common_ctype);
 
-                self.get_rvalue(left, left_temp)?;
-                self.get_rvalue(right, right_temp)?;
+                self.eval_expression(left, left_temp)?;
+                self.eval_expression(right, right_temp)?;
 
                 if common_ctype_size == WORD_SIZE {
                     let [left_reg, right_reg] = self.regs();
@@ -1020,8 +1068,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let left_temp = self.allocate_anon(destination.ctype);
                 let right_temp = self.allocate_anon(destination.ctype);
 
-                self.get_rvalue(left, left_temp)?;
-                self.get_rvalue(right, right_temp)?;
+                self.eval_expression(left, left_temp)?;
+                self.eval_expression(right, right_temp)?;
 
                 let [left_reg, right_reg] = self.regs();
 
@@ -1051,45 +1099,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(());
                 };
 
-                let CType::PointerTo(element_ctypeid, _) = self.type_of_expr(left)? else {
-                    bail!("{left} has a non-indexable type");
-                };
-
-                let element_ctype = self.generator.program.get_ctype(element_ctypeid);
-
-                let temp_index_storage = self.allocate_anon(CPrimitive::Int);
-                let temp_ptr_storage =
-                    self.allocate_anon(self.generator.program.pointer_to(element_ctype));
-
-                self.get_rvalue(right, temp_index_storage)?;
-                self.get_rvalue(left, temp_ptr_storage)?;
-
-                let ele_pointer = self.reg();
-
-                self.b.load_dword(ele_pointer, temp_ptr_storage);
-
-                let ele_index = self.reg();
-
-                self.b.load_dword(ele_index, temp_index_storage);
-
-                let element_size = self.generator.sizeof_ctype(element_ctype);
-
-                if element_size > 1 {
-                    if !element_size.is_power_of_two() {
-                        todo!("Support indexing non-power of 2 element sizes (requires multiplication)");
-                    }
-
-                    self.b
-                        .shift_left(ele_index, ele_index, element_size.ilog2());
-                }
-
-                self.b.add(ele_pointer, ele_pointer, ele_index);
-
-                self.b.release_reg(ele_index);
-
-                self.b.header("freeing index & ptr");
-                self.free_local(temp_index_storage);
-                self.free_local(temp_ptr_storage);
+                let (element_ctype, ele_pointer) = self.calculate_element_address(left, right)?;
 
                 self.copy_lvalue(
                     TypedLocation::new(element_ctype, Address::at(ele_pointer)),
@@ -1108,8 +1118,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let left_temp = self.allocate_anon(left_ctype);
                 let right_temp = self.allocate_anon(right_ctype);
 
-                self.get_rvalue(left, left_temp)?;
-                self.get_rvalue(right, right_temp)?;
+                self.eval_expression(left, left_temp)?;
+                self.eval_expression(right, right_temp)?;
 
                 if destination.is_nowhere() {
                     // discard the result.
@@ -1161,7 +1171,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 });
 
                 self.b.header("Evaluate LHS");
-                self.get_rvalue(left, condition_storage)?;
+                self.eval_expression(left, condition_storage)?;
 
                 self.b.header("Test if LHS is truthy");
 
@@ -1180,7 +1190,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.b.header("LHS is falsey, evaluate RHS");
                 }
 
-                self.get_rvalue(right, condition_storage)?;
+                self.eval_expression(right, condition_storage)?;
 
                 self.b.label(done_label);
 
@@ -1200,6 +1210,48 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         };
 
         Ok(())
+    }
+
+    fn calculate_element_address(
+        &mut self,
+        target: &Expr,
+        index: &Expr,
+    ) -> Result<(CType, Reg), anyhow::Error> {
+        let CType::PointerTo(element_ctypeid, _) = self.type_of_expr(target)? else {
+            bail!("{target} has a non-indexable type");
+        };
+
+        let element_ctype = self.generator.program.get_ctype(element_ctypeid);
+
+        let temp_index_storage = self.allocate_anon(CPrimitive::Int);
+        self.eval_expression(index, temp_index_storage)?;
+
+        let temp_ptr_storage = self.allocate_anon(self.generator.program.pointer_to(element_ctype));
+        self.eval_expression(target, temp_ptr_storage)?;
+
+        let ele_pointer = self.reg();
+        self.b.load_dword(ele_pointer, temp_ptr_storage);
+        self.free_local(temp_ptr_storage);
+
+        let ele_index = self.reg();
+        self.b.load_dword(ele_index, temp_index_storage);
+        self.free_local(temp_index_storage);
+
+        let element_size = self.generator.sizeof_ctype(element_ctype);
+
+        if element_size > 1 {
+            if !element_size.is_power_of_two() {
+                todo!("Support indexing non-power of 2 element sizes (requires multiplication)");
+            }
+
+            self.b
+                .shift_left(ele_index, ele_index, element_size.ilog2());
+        }
+
+        self.b.add(ele_pointer, ele_pointer, ele_index);
+        self.b.release_reg(ele_index);
+
+        Ok((element_ctype, ele_pointer))
     }
 
     fn type_of_expr(&self, expr: &Expr) -> anyhow::Result<CType> {
@@ -1335,6 +1387,12 @@ impl TypedLocation {
 
     const fn is_somewhere(&self) -> bool {
         !self.is_nowhere()
+    }
+}
+
+impl Address {
+    fn with_ctype(self, ctype: CType) -> TypedLocation {
+        TypedLocation::new(ctype, self)
     }
 }
 
