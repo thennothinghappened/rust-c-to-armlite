@@ -232,7 +232,7 @@ impl<'a> Parser<'a> {
 
         // Evil right-associative pointer syntax >:(((
         while self.accept(TokenKind::Star) {
-            this_type = CType::pointer_to(self.program.ctype_id_of(this_type));
+            this_type = self.program.pointer_to(this_type);
         }
 
         Ok(this_type)
