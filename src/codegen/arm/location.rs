@@ -7,6 +7,23 @@ pub enum Location {
     Reg(Reg),
 }
 
+impl Location {
+    pub const NOWHERE: Self = Location::Address(Address::LiteralIndex {
+        base: Reg::LinkReg,
+        offset: i32::MAX,
+    });
+
+    pub const fn is_nowhere(self) -> bool {
+        matches!(
+            self,
+            Location::Address(Address::LiteralIndex {
+                base: Reg::LinkReg,
+                offset: i32::MAX
+            })
+        )
+    }
+}
+
 impl From<Address> for Location {
     fn from(value: Address) -> Self {
         Location::Address(value)

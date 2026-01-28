@@ -1296,7 +1296,7 @@ impl TypedLocation {
     }
 
     const fn is_nowhere(&self) -> bool {
-        matches!(self.ctype, CType::AsIs(CConcreteType::Void))
+        matches!(self.ctype, CType::AsIs(CConcreteType::Void)) || self.location.is_nowhere()
     }
 
     const fn is_somewhere(&self) -> bool {
@@ -1318,8 +1318,5 @@ impl From<StackLocal> for TypedLocation {
 
 const NOWHERE: TypedLocation = TypedLocation {
     ctype: CType::AsIs(CConcreteType::Void),
-    location: Location::Address(Address::LiteralIndex {
-        base: Reg::LinkReg,
-        offset: 0,
-    }),
+    location: Location::NOWHERE,
 };
