@@ -35,6 +35,13 @@ pub(crate) struct FuncBuilder<'a> {
     doc_comment: Vec<String>,
 
     labels: HashMap<LabelId, String>,
+
+    /// A given label ID which is used to refer to the same instruction as a previous label ID is an
+    /// alias of that first ID. This is a mapping that matches aliasing ID -> canonical ID, to
+    /// coalesce them into a single label, since ARMLite doesn't support multiple labels for the
+    /// same instruction.
+    label_aliases: HashMap<LabelId, LabelId>,
+
     next_label_id: Cell<LabelId>,
     pub asm_mode: AsmMode,
     pub(crate) register_pool: IndexMap<Reg, RegStatus>,
@@ -63,6 +70,7 @@ impl<'a> FuncBuilder<'a> {
             name,
             next_label_id: Cell::default(),
             labels: HashMap::default(),
+            label_aliases: HashMap::default(),
             asm_mode,
             register_pool: IndexMap::from([
                 (Reg::R0, RegStatus::default()),
@@ -457,7 +465,15 @@ impl<'a> FuncBuilder<'a> {
     }
 
     pub fn label(&mut self, id: LabelId) {
-        self.append(Inst::Label(id))
+        let Some(Inst::Label(canonical_id)) = self.instructions.last() else {
+            self.append(Inst::Label(id));
+            return;
+        };
+
+        self.label_aliases.insert(id, *canonical_id);
+
+        let alias_name = self.labels.remove(&id).unwrap();
+        *self.labels.get_mut(canonical_id).unwrap() += &format!("_aka_{alias_name}");
     }
 
     pub fn asm(&mut self, asm: impl Into<String>) {
@@ -591,7 +607,12 @@ impl<'a> FuncBuilder<'a> {
     }
 
     fn format_label(&self, id: LabelId) -> String {
-        format!("L{}_{}__{}", self.labels[&id], id.0, self.name)
+        let canonical_id = self.label_aliases.get(&id).unwrap_or(&id);
+
+        format!(
+            "L{}_{}__{}",
+            self.labels[canonical_id], canonical_id.0, self.name
+        )
     }
 
     fn format_branch_target(&self, target: &BranchTarget) -> String {
