@@ -206,4 +206,8 @@ impl<'a> Context<'a> {
     pub(crate) fn get_macro(&self, name: &str) -> Option<Rc<Vec<Token>>> {
         self.macros.borrow().get(name).cloned()
     }
+
+    pub(crate) fn remove_macro(&self, name: &str) {
+        self.macros.borrow_mut().remove(name);
+    }
 }

@@ -15,6 +15,7 @@ impl<'a> Lexer<'a> {
             "else" | "elifdef" | "elifndef" => self.else_directive(),
             "endif" => self.endif_directive(),
             "define" => self.define_directive(),
+            "undef" => self.undef_directive(),
             "error" => self.error_directive(),
 
             directive => {
@@ -173,6 +174,15 @@ impl<'a> Lexer<'a> {
         }
 
         self.context.define_macro(definition_name, content);
+
+        TokenKind::DiscardMarker
+    }
+
+    fn undef_directive(&mut self) -> TokenKind {
+        self.skip_whitespace();
+
+        let name = self.take_chars_while(is_valid_identifier);
+        self.context.remove_macro(name);
 
         TokenKind::DiscardMarker
     }
