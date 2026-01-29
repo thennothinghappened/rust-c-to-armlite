@@ -43,7 +43,7 @@ pub enum CommentPosition {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub(super) enum BranchTarget {
+pub enum BranchTarget {
     Label(LabelId),
     Relative(i32),
     VerbatimLabel(String),
