@@ -96,7 +96,7 @@ impl<'a> Parser<'a> {
 
                     // Standard attribute.
                     None => match name.as_str() {
-                        "nodiscard" => is_noreturn = true,
+                        "noreturn" => is_noreturn = true,
                         "deprecated" => (),
                         _ => (),
                     },
