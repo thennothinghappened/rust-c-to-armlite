@@ -1,4 +1,4 @@
-use crate::codegen::arm::{reg::Reg, value::Value, Address};
+use crate::codegen::arm::{address::LiteralIndexAddress, reg::Reg, value::Value, Address};
 
 /// Somewhere that holds a value.
 #[derive(Clone, Copy)]
@@ -8,18 +8,18 @@ pub enum Location {
 }
 
 impl Location {
-    pub const NOWHERE: Self = Location::Address(Address::LiteralIndex {
+    pub const NOWHERE: Self = Location::Address(Address::LiteralIndex(LiteralIndexAddress {
         base: Reg::LinkReg,
         offset: i32::MAX,
-    });
+    }));
 
     pub const fn is_nowhere(self) -> bool {
         matches!(
             self,
-            Location::Address(Address::LiteralIndex {
+            Location::Address(Address::LiteralIndex(LiteralIndexAddress {
                 base: Reg::LinkReg,
                 offset: i32::MAX
-            })
+            }))
         )
     }
 }

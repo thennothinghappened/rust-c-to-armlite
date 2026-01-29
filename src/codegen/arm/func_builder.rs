@@ -12,7 +12,7 @@ use itertools::Itertools;
 use crate::{
     codegen::{
         arm::{
-            address::Address,
+            address::{Address, LiteralIndexAddress},
             inst::{BranchTarget, CommentPosition, Inst},
             location::Location,
             reg::{OneOrMoreRegisters, Reg},
@@ -184,7 +184,10 @@ impl<'a> FuncBuilder<'a> {
                             Address::at(destination_addr_reg),
                         );
 
-                        self.copy_byte(source_addr_reg + 2, destination_addr_reg + 2);
+                        self.copy_byte(
+                            Address::offset(source_addr_reg, 2),
+                            Address::offset(destination_addr_reg, 2),
+                        );
                     }
 
                     4 => self.copy_dword(
@@ -571,7 +574,7 @@ impl<'a> FuncBuilder<'a> {
         let addr = addr.into();
 
         match addr {
-            Address::LiteralIndex { base, offset: 0 } => match extra_offset {
+            Address::LiteralIndex(LiteralIndexAddress { base, offset: 0 }) => match extra_offset {
                 0 => self.move_dword(dest, base),
                 _ => self.load_address(dest, base + extra_offset, 0),
             },
@@ -588,7 +591,7 @@ impl<'a> FuncBuilder<'a> {
                 }
             }
 
-            Address::LiteralIndex { base, offset } => {
+            Address::LiteralIndex(LiteralIndexAddress { base, offset }) => {
                 if offset < 0 {
                     self.sub(dest, base, -offset - extra_offset)
                 } else {
@@ -652,7 +655,7 @@ impl<'a> FuncBuilder<'a> {
 
     pub fn format_address(&self, address: &Address) -> String {
         match address {
-            Address::LiteralIndex { base, offset: 0 } => format!("[{base}]"),
+            Address::LiteralIndex(LiteralIndexAddress { base, offset: 0 }) => format!("[{base}]"),
 
             Address::RelativeIndex(addr) => match self.asm_mode {
                 AsmMode::ArmLite => format!(
@@ -666,7 +669,7 @@ impl<'a> FuncBuilder<'a> {
                 }
             },
 
-            &Address::LiteralIndex { base, offset } => match self.asm_mode {
+            &Address::LiteralIndex(LiteralIndexAddress { base, offset }) => match self.asm_mode {
                 AsmMode::ArmLite => format!(
                     "[{base}{symbol}#{offset}]",
                     symbol = if offset < 0 { "-" } else { "+" },

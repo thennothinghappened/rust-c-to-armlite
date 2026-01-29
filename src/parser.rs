@@ -483,8 +483,8 @@ impl<'a> Parser<'a> {
             match token {
                 TokenKind::Comma => Some(BinaryOp::AndThen),
                 TokenKind::Assign => Some(BinaryOp::Assign),
-                TokenKind::PlusAssign => Some(BinaryOp::PlusAssign),
-                TokenKind::MinusAssign => Some(BinaryOp::MinusAssign),
+                TokenKind::PlusAssign => Some(BinaryOp::OpAndAssign(BinaryOp::Plus.into())),
+                TokenKind::MinusAssign => Some(BinaryOp::OpAndAssign(BinaryOp::Minus.into())),
                 TokenKind::BooleanEqual => Some(BinaryOp::LogicEqual(CompareMode::Equal)),
                 TokenKind::BooleanNotEqual => Some(BinaryOp::LogicEqual(CompareMode::NotEqual)),
                 TokenKind::BooleanAnd => Some(BinaryOp::LogicAnd),
@@ -497,10 +497,12 @@ impl<'a> Parser<'a> {
             }
             .filter(|op| op.binding_strength() >= min_power)
         }) {
+            let binding_strength = op.binding_strength();
+
             lhs = Expr::BinaryOp(
                 op,
                 Box::new(lhs),
-                Box::new(self.parse_expr(op.binding_strength())?),
+                Box::new(self.parse_expr(binding_strength)?),
             );
         }
 

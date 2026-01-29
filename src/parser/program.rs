@@ -355,9 +355,7 @@ impl Program {
             Expr::BinaryOp(op, left, right) => match op {
                 BinaryOp::AndThen => self.type_of_expr(scope, right),
 
-                BinaryOp::Assign | BinaryOp::PlusAssign | BinaryOp::MinusAssign => {
-                    self.type_of_expr(scope, left)
-                }
+                BinaryOp::Assign | BinaryOp::OpAndAssign(_) => self.type_of_expr(scope, left),
 
                 BinaryOp::LogicEqual(_)
                 | BinaryOp::LogicOrdering(_)

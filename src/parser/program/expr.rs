@@ -20,7 +20,7 @@ pub trait BindingPower {
     fn binding_strength(&self) -> i32;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryOp {
     ArrayIndex,
 
@@ -38,11 +38,43 @@ pub enum BinaryOp {
 
     /// Assign whatever LHS resolves to, to the evaluated value of RHS, and return that value.
     Assign,
-    PlusAssign,
-    MinusAssign,
+
+    /// Assign LHS to LHS (op) RHS.
+    OpAndAssign(Box<BinaryOp>),
 
     /// Comma operator: evaluate LHS, discard, evaluate RHS, return.
     AndThen,
+}
+
+impl Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BinaryOp::ArrayIndex => "[]",
+                BinaryOp::Plus => "+",
+                BinaryOp::Minus => "-",
+                BinaryOp::BitwiseLeftShift => "<<",
+                BinaryOp::BitwiseRightShift => ">>",
+                BinaryOp::LogicOrdering(order_mode) => match order_mode {
+                    OrderMode::LessThan => "<",
+                    OrderMode::LessOrEqual => "<=",
+                    OrderMode::GreaterThan => ">",
+                    OrderMode::GreaterOrEqual => ">=",
+                },
+                BinaryOp::LogicEqual(compare_mode) => "==",
+                BinaryOp::BitwiseXor => "^",
+                BinaryOp::BitwiseAnd => "&",
+                BinaryOp::BitwiseOr => "|",
+                BinaryOp::LogicAnd => "&&",
+                BinaryOp::LogicOr => "||",
+                BinaryOp::Assign => "=",
+                BinaryOp::OpAndAssign(op) => return write!(f, "{op}="),
+                BinaryOp::AndThen => ", ",
+            }
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,8 +111,7 @@ impl BindingPower for BinaryOp {
             Self::LogicAnd => 11,
             Self::LogicOr => 12,
             Self::Assign => 14,
-            Self::PlusAssign => 14,
-            Self::MinusAssign => 14,
+            Self::OpAndAssign(_) => 14,
             Self::AndThen => 15,
         }
     }
@@ -132,8 +163,7 @@ impl Display for Expr {
             Expr::BinaryOp(op, lhs, rhs) => match op {
                 BinaryOp::AndThen => write!(f, "{lhs}, {rhs}"),
                 BinaryOp::Assign => write!(f, "{lhs} = {rhs}"),
-                BinaryOp::PlusAssign => write!(f, "{lhs} += {rhs}"),
-                BinaryOp::MinusAssign => write!(f, "{lhs} -= {rhs}"),
+                BinaryOp::OpAndAssign(op) => write!(f, "{lhs} {op}= {rhs}"),
                 BinaryOp::LogicOrdering(mode) => match mode {
                     OrderMode::LessThan => write!(f, "{lhs} < {rhs}"),
                     OrderMode::LessOrEqual => write!(f, "{lhs} <= {rhs}"),

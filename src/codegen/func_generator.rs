@@ -10,13 +10,16 @@ use itertools::Itertools;
 
 use crate::{
     codegen::{
-        arm::{address::Address, location::Location},
+        arm::{
+            address::{Address, LiteralIndexAddress},
+            location::Location,
+        },
         func_builder::{FuncBuilder, LabelId},
         Generator, Reg, WORD_SIZE,
     },
     parser::program::{
         ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType},
-        expr::{call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
+        expr::{self, call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
         statement::{Block, Statement},
         ExecutionScope, Symbol,
     },
@@ -558,7 +561,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             Expr::Call(call) => self.generate_call(&call.target, &call.args, destination)?,
 
             Expr::BinaryOp(op, left, right) => {
-                self.generate_binop(destination, *op, left, right)?
+                self.generate_binop(destination, op.clone(), left, right)?
             }
 
             Expr::UnaryOp(op, expr) => match op {
@@ -654,25 +657,13 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     todo!()
                 }
 
-                UnaryOp::AddressOf => match &**expr {
-                    Expr::Reference(name) => {
-                        if let Some(var) = self.get_localvar(name) {
-                            let reg = self.reg();
+                UnaryOp::AddressOf => {
+                    let address_reg = self.address_of(expr)?;
+                    let pointer_type = self.generator.program.pointer_to(self.type_of_expr(expr)?);
 
-                            self.b.load_address(reg, var, 0);
-                            self.b.copy_dword(reg, destination.location);
-
-                            self.release_reg(reg);
-
-                            return Ok(());
-                        }
-
-                        todo!()
-                    }
-
-                    Expr::UnaryOp(unary_op, expr) => todo!(),
-                    expr => bail!("Cannot take the address of non-lvalue `{expr}`"),
-                },
+                    self.copy_lvalue(TypedLocation::new(pointer_type, address_reg), destination)?;
+                    self.release_reg(address_reg);
+                }
 
                 UnaryOp::Dereference => {
                     let CType::PointerTo(inner_id, _) = self.type_of_expr(expr)? else {
@@ -710,6 +701,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     ) -> anyhow::Result<()> {
         let source = source.into();
         let destination = destination.into();
+
+        if destination.is_nowhere() {
+            return Ok(());
+        }
 
         match (source.ctype, destination.ctype) {
             (CType::AsIs(source_concrete), CType::AsIs(destination_concrete))
@@ -1003,12 +998,20 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 Expr::Cast(expr, ctype) => todo!("Cast assignment target >:("),
             },
 
-            BinaryOp::PlusAssign => {
-                // self.generate_binop(destination, BinaryOp::Plus, left, right)?;
-                // self.generate_binop(destination, BinaryOp::Assign, left, right)?;
-            }
+            BinaryOp::OpAndAssign(op) => {
+                let address_reg = self.address_of(left)?;
 
-            BinaryOp::MinusAssign => {}
+                let target_ctype = self.type_of_expr(left)?;
+                let target_location = TypedLocation::new(target_ctype, Address::at(address_reg));
+
+                self.generate_binop(target_location, *op, left, right)?;
+
+                if destination.is_somewhere() {
+                    self.copy_lvalue(target_location, destination)?;
+                }
+
+                self.release_reg(address_reg);
+            }
 
             BinaryOp::LogicEqual(mode) => {
                 let is_false = self.b.create_label("LogicEqual__isFalse");
@@ -1255,6 +1258,24 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         Ok((element_ctype, ele_pointer))
     }
 
+    fn address_of(&mut self, target: &Expr) -> anyhow::Result<Reg> {
+        match target {
+            Expr::Reference(name) => {
+                if let Some(var) = self.get_localvar(name) {
+                    let reg = self.reg();
+                    self.b.load_address(reg, var, 0);
+
+                    return Ok(reg);
+                }
+
+                todo!()
+            }
+
+            Expr::UnaryOp(unary_op, expr) => todo!(),
+            expr => bail!("Cannot take the address of non-lvalue `{expr}`"),
+        }
+    }
+
     fn type_of_expr(&self, expr: &Expr) -> anyhow::Result<CType> {
         self.generator.program.type_of_expr(self, expr)
     }
@@ -1272,13 +1293,19 @@ struct StackLocal {
     ctype: CType,
 }
 
+impl StackLocal {
+    pub const fn location(&self) -> Location {
+        Location::Address(stack_offset(self.offset))
+    }
+}
+
 impl From<StackLocal> for Address {
     fn from(value: StackLocal) -> Self {
         stack_offset(value.offset)
     }
 }
 
-fn stack_offset(offset: i32) -> Address {
+const fn stack_offset(offset: i32) -> Address {
     Address::offset(Reg::R11, offset)
 }
 
