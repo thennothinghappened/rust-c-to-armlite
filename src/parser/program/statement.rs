@@ -22,6 +22,7 @@ pub enum Statement {
     Return(Box<Expr>),
     Break,
     Continue,
+    Empty,
     Asm(String),
 }
 

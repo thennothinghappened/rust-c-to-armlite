@@ -289,6 +289,12 @@ impl<'a> Parser<'a> {
 
     fn parse_statement(&mut self, scope: &mut BlockBuilder) -> Result<Statement, ParseError> {
         match self.peek().kind {
+            TokenKind::Semicolon => {
+                self.next();
+
+                Ok(Statement::Empty)
+            }
+
             TokenKind::OpenCurly => {
                 scope.with_child_scope(|scope| Ok(self.parse_block(scope)?.into()))
             }

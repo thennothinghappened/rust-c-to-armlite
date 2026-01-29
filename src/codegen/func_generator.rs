@@ -434,6 +434,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             Statement::Block(block) => self.generate_block(block)?,
 
             Statement::Asm(content) => self.b.asm(content),
+            Statement::Empty => (),
         };
 
         Ok(())
