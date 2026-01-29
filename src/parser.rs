@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use thiserror::Error;
 
@@ -331,6 +331,56 @@ impl<'a> Parser<'a> {
                 Ok(Statement::While {
                     condition: Box::new(condition),
                     block: Box::new(block),
+                })
+            }
+
+            TokenKind::For => {
+                self.next();
+
+                scope.with_child_scope(|mut scope| {
+                    self.expect(TokenKind::OpenParen)?;
+
+                    let initialisation_statement = if !self.accept(TokenKind::Semicolon) {
+                        self.parse_statement(&mut scope)?
+                    } else {
+                        Statement::Empty
+                    };
+
+                    let loop_condition = if !self.next_is(TokenKind::Semicolon) {
+                        Some(self.parse_expr(0)?)
+                    } else {
+                        None
+                    };
+
+                    self.expect(TokenKind::Semicolon)?;
+
+                    let repeated_expression = if !self.next_is(TokenKind::CloseParen) {
+                        Some(self.parse_expr(0)?)
+                    } else {
+                        None
+                    };
+
+                    self.expect(TokenKind::CloseParen)?;
+
+                    let mut block = self.parse_statement(&mut scope)?;
+
+                    if let Some(repeated_expression) = repeated_expression {
+                        block = Statement::Block(Block {
+                            statements: vec![block, Statement::Expr(repeated_expression)],
+                            vars: HashMap::default(),
+                        });
+                    }
+
+                    Ok(Statement::Block(Block {
+                        statements: vec![
+                            initialisation_statement,
+                            Statement::While {
+                                condition: Box::new(loop_condition.unwrap_or(Expr::IntLiteral(1))),
+                                block: Box::new(block),
+                            },
+                        ],
+                        vars: HashMap::default(),
+                    }))
                 })
             }
 
