@@ -1,7 +1,7 @@
 
 #include <stddef.h>
-#include <armlite.h>
-#include <armlite-io.h>
+#include <armlite/armlite.h>
+#include <armlite/armlite-io.h>
 
 int PrintFormatted(char *format, int *argsArray)
 {

@@ -1,5 +1,5 @@
 
-#include <armlite.h>
+#include <armlite/armlite.h>
 #include <string.h>
 
 #ifndef __armlitec__
