@@ -438,11 +438,16 @@ impl<'a> Parser<'a> {
                     return Ok(Statement::Expr(expr));
                 }
 
-                self.error(format!(
-                    "Not a variable decl: {}\nAnd not an expression: {}",
-                    parse_as_variable_result.unwrap_err(),
-                    parse_as_expr_result.unwrap_err()
-                ))
+                let parse_as_variable_error = parse_as_variable_result.unwrap_err();
+                let parse_as_expr_error = parse_as_expr_result.unwrap_err();
+
+                Err(ParseError {
+                    span: parse_as_variable_error.span.union(parse_as_expr_error.span),
+                    kind: ParseErrorKind::Lazy(format!(
+                        "Not a variable decl: {}\nAnd not an expression: {}",
+                        parse_as_variable_error, parse_as_expr_error
+                    )),
+                })
             }
         }
     }
