@@ -16,7 +16,7 @@ use crate::{
     codegen::arm::AsmMode,
     context::{Context, IncludeType},
     lexer::Lexer,
-    parser::Parser,
+    parser::{program::target_architecture::TargetArchitecture, Parser},
 };
 
 #[macro_use]
@@ -29,7 +29,7 @@ mod parser;
 mod span;
 
 fn main() {
-    let mut asm_mode = AsmMode::default();
+    let mut target = TargetArchitecture::default();
 
     let codespan_config = codespan_reporting::term::Config::default();
     let codespan_writer =
@@ -41,7 +41,7 @@ fn main() {
     for option in options {
         match &option[2..] {
             "armv7" => {
-                asm_mode = AsmMode::ArmV7;
+                target = TargetArchitecture::ArmV7;
             }
             _ => panic!("Unknown option {option}"),
         }
@@ -50,13 +50,9 @@ fn main() {
     if let Some(path) = args.pop_front() {
         let buf = read_to_string(&path).expect("Must pass a valid path to read from");
 
-        let Some(output) = parse_program(
-            buf,
-            asm_mode,
-            Some(path),
-            &codespan_writer,
-            &codespan_config,
-        ) else {
+        let Some(output) =
+            parse_program(buf, target, Some(path), &codespan_writer, &codespan_config)
+        else {
             return;
         };
 
@@ -82,8 +78,7 @@ fn main() {
             }
         }
 
-        if let Some(output) = parse_program(buf, asm_mode, None, &codespan_writer, &codespan_config)
-        {
+        if let Some(output) = parse_program(buf, target, None, &codespan_writer, &codespan_config) {
             println!("--- Code generated ---\n{output}");
         }
     }
@@ -91,12 +86,12 @@ fn main() {
 
 fn parse_program(
     text: String,
-    asm_mode: AsmMode,
+    target: TargetArchitecture,
     file_name: Option<String>,
     codespan_writer: &term::termcolor::StandardStream,
     codespan_config: &term::Config,
 ) -> Option<String> {
-    let context = Rc::new(Context::new(asm_mode));
+    let context = Rc::new(Context::new(target));
 
     let source_id = match file_name {
         Some(path) => context
@@ -138,5 +133,13 @@ fn parse_program(
 
     println!("Program: {program}");
 
-    Some(codegen::Generator::new(program, asm_mode).generate())
+    match target {
+        TargetArchitecture::ArmLite => {
+            Some(codegen::Generator::new(program, AsmMode::ArmLite).generate())
+        }
+
+        TargetArchitecture::ArmV7 => {
+            Some(codegen::Generator::new(program, AsmMode::ArmV7).generate())
+        }
+    }
 }

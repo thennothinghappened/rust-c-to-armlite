@@ -897,6 +897,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 let common_ctype = self
                     .generator
+                    .program
                     .common_ctype(&self.type_of_expr(left)?, &self.type_of_expr(right)?)?;
 
                 let common_ctype_size = self.generator.sizeof_ctype(common_ctype);

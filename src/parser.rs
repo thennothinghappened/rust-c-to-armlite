@@ -30,8 +30,8 @@ pub struct Parser<'a> {
 impl<'a> Parser<'a> {
     pub fn new(lexer: Lexer<'a>) -> Self {
         Self {
+            program: Program::new(lexer.context.target),
             lexer,
-            program: Program::default(),
         }
     }
 

@@ -19,12 +19,14 @@ use crate::{
         },
         expr::{BinaryOp, Expr, UnaryOp},
         statement::{Block, Variable},
+        target_architecture::TargetArchitecture,
     },
 };
 
 pub mod ctype;
 pub mod expr;
 pub mod statement;
+pub(crate) mod target_architecture;
 
 #[derive(Debug, Clone)]
 pub enum Symbol {
@@ -32,7 +34,7 @@ pub enum Symbol {
     Var(CType, Option<Expr>),
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct Program {
     global_symbols: IndexMap<String, Symbol>,
 
@@ -47,12 +49,27 @@ pub struct Program {
     func_types: HashMap<CSigId, CSig>,
     next_func_type_id: CSigId,
 
-    ctypes_by_name: HashMap<String, CTypeId>,
+    type_aliases: HashMap<String, CTypeId>,
     ctypes: RefCell<HashMap<CTypeId, CType>>,
     next_ctype_id: Cell<CTypeId>,
+
+    target: TargetArchitecture,
 }
 
 impl Program {
+    pub fn new(target: TargetArchitecture) -> Self {
+        let mut this = Self {
+            target,
+            ..Default::default()
+        };
+
+        for (&name, &primitive) in target.type_aliases() {
+            this.create_type_alias(name.to_owned(), this.get_ctype_id(&primitive.into()));
+        }
+
+        this
+    }
+
     /// Declare that the given type name refers to a specific type, whether declared inline, or an
     /// known existing type.
     pub fn create_type_alias(
@@ -60,7 +77,7 @@ impl Program {
         name: String,
         ctype_id: CTypeId,
     ) -> Result<(), anyhow::Error> {
-        self.ctypes_by_name.insert(name, ctype_id);
+        self.type_aliases.insert(name, ctype_id);
         Ok(())
     }
 
@@ -70,7 +87,7 @@ impl Program {
             *self
                 .ctypes
                 .borrow()
-                .get(self.ctypes_by_name.get(name)?)
+                .get(self.type_aliases.get(name)?)
                 .expect("typedef names->ids shouldn't de-sync with ids->types!!"),
         )
     }
@@ -410,6 +427,110 @@ impl Program {
             Expr::Cast(expr, ctype) => Ok(*ctype),
         }
     }
+
+    /// Obtain the most specific common type between `a` and `b`, if one exists.
+    pub fn common_ctype(&self, a: &CType, b: &CType) -> anyhow::Result<CType> {
+        if a == b {
+            return Ok(*a);
+        }
+
+        match (a, b) {
+            (CType::PointerTo(a_inner, None), CType::PointerTo(b_inner, None)) => {
+                match (self.is_generic_pointer(*a), self.is_generic_pointer(*b)) {
+                    // Either will do.
+                    (true, true) => Ok(*a),
+
+                    // Take the non-generic (a).
+                    (false, true) => Ok(*a),
+
+                    // Take the non-generic (b).
+                    (true, false) => Ok(*b),
+
+                    // No overlap between these types.
+                    (false, false) => bail!(
+                        "No overlap between pointer types `{}` and `{}`",
+                        self.format_ctype(*a),
+                        self.format_ctype(*b)
+                    ),
+                }
+            }
+
+            (
+                CType::AsIs(CConcreteType::Primitive(a_primitive)),
+                CType::AsIs(CConcreteType::Primitive(b_primitive)),
+            ) => Ok(self
+                .common_real_primitive(*a_primitive, *b_primitive)
+                .into()),
+
+            _ => bail!(
+                "No overlap between types {} and {}",
+                self.format_ctype(*a),
+                self.format_ctype(*b)
+            ),
+        }
+    }
+
+    /// Obtain a common primitive type from the given primitives `a` and `b` which can most
+    /// adequately represent the range of values the input types can hold.
+    pub fn common_real_primitive(&self, a: CPrimitive, b: CPrimitive) -> CPrimitive {
+        let (promoted_a, promoted_b) = match (a.is_floating_type(), b.is_floating_type()) {
+            // Pass through to picking the larger float type.
+            (true, true) => (a, b),
+
+            // Convert the integer to a float.
+            (true, false) => (a, a),
+            (false, true) => (b, b),
+
+            // Both are integers, promote!
+            (false, false) => (self.promote_integer(a), self.promote_integer(b)),
+        };
+
+        if self.target.rank_of_primitive(promoted_a) > self.target.rank_of_primitive(promoted_b) {
+            promoted_a
+        } else {
+            promoted_b
+        }
+    }
+
+    /// Promote an integer type up to `int` or `unsigned int`, if its rank is lower, or preserve the
+    /// given type should its rank exceed either of those.
+    pub fn promote_integer(&self, integer: CPrimitive) -> CPrimitive {
+        assert!(
+            integer.is_integer_type(),
+            "Shouldn't pass a non-integer primitive type to promotion"
+        );
+
+        if self.target.rank_of_primitive(integer) < self.target.rank_of_primitive(CPrimitive::Int) {
+            match self.is_signed_primitive(integer) {
+                true => CPrimitive::Int,
+                false => CPrimitive::UnsignedInt,
+            }
+        } else {
+            integer
+        }
+    }
+
+    /// Return whether the given primitive is a signed type on this platform.
+    pub fn is_signed_primitive(&self, primitive: CPrimitive) -> bool {
+        match primitive {
+            CPrimitive::Char
+            | CPrimitive::SignedChar
+            | CPrimitive::Short
+            | CPrimitive::Int
+            | CPrimitive::Long
+            | CPrimitive::LongLong
+            | CPrimitive::Float
+            | CPrimitive::Double
+            | CPrimitive::LongDouble => true,
+
+            CPrimitive::Bool
+            | CPrimitive::UnsignedChar
+            | CPrimitive::UnsignedShort
+            | CPrimitive::UnsignedInt
+            | CPrimitive::UnsignedLong
+            | CPrimitive::UnsignedLongLong => false,
+        }
+    }
 }
 
 pub(crate) trait ExecutionScope {
@@ -429,7 +550,7 @@ impl Display for Program {
         writeln!(f, "enums: {:?}", self.enums_by_name)?;
         writeln!(f, "structs: {:?}", self.structs_by_name)?;
         writeln!(f, "type id mapping: {:?}", self.ctypes)?;
-        writeln!(f, "typedefs: {:?}", self.ctypes_by_name)?;
+        writeln!(f, "typedefs: {:?}", self.type_aliases)?;
         Ok(())
     }
 }

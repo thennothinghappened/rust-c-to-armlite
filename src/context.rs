@@ -15,6 +15,7 @@ use crate::{
         tokenkind::{IdentId, TokenKind},
         Token,
     },
+    parser::program::target_architecture::TargetArchitecture,
     span::Span,
 };
 
@@ -36,7 +37,7 @@ pub(crate) struct Context<'a> {
 
     idents: RefCell<Vec<Rc<String>>>,
     macros: RefCell<HashMap<String, Rc<Vec<Token>>>>,
-    asm_mode: AsmMode,
+    pub target: TargetArchitecture,
 }
 
 struct SourceData {
@@ -52,9 +53,9 @@ pub enum IncludeType {
 }
 
 impl<'a> Context<'a> {
-    pub fn new(asm_mode: AsmMode) -> Self {
+    pub fn new(target: TargetArchitecture) -> Self {
         let this = Self {
-            asm_mode,
+            target,
             ..Default::default()
         };
 
@@ -67,8 +68,8 @@ impl<'a> Context<'a> {
             }],
         );
 
-        match asm_mode {
-            AsmMode::ArmLite => this.define_macro(
+        match target {
+            TargetArchitecture::ArmLite => this.define_macro(
                 "__armlite__",
                 vec![Token {
                     kind: TokenKind::IntLiteral(1),
@@ -76,7 +77,7 @@ impl<'a> Context<'a> {
                 }],
             ),
 
-            AsmMode::ArmV7 => this.define_macro(
+            TargetArchitecture::ArmV7 => this.define_macro(
                 "__arm__",
                 vec![Token {
                     kind: TokenKind::IntLiteral(1),
