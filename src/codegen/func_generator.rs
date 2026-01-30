@@ -1261,7 +1261,20 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(reg);
                 }
 
-                todo!()
+                let Some(symbol) = self.generator.program.get_symbol_by_name(name) else {
+                    bail!("Unknown symbol `{name}`")
+                };
+
+                match symbol {
+                    Symbol::Func(_) => {
+                        let reg = self.reg();
+                        self.b.asm(format!("MOV {reg}, #fn_{name}"));
+
+                        Ok(reg)
+                    }
+
+                    Symbol::Var(_, _) => todo!(),
+                }
             }
 
             Expr::UnaryOp(unary_op, expr) => todo!(),
