@@ -1137,57 +1137,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
             UnaryOp::SizeOf => {
                 let size = self.generator.sizeof_ctype(self.type_of_expr(expr)?);
-
-                match destination.ctype {
-                    CType::AsIs(cconcrete_type) => {
-                        match cconcrete_type {
-                            CConcreteType::Void => (),
-
-                            CConcreteType::Struct(_) => {
-                                bail!("A struct is not a valid assignment target for a number")
-                            }
-
-                            CConcreteType::Func(_) => {
-                                bail!("A function pointer is not a valid assignment target for a number")
-                            }
-
-                            CConcreteType::Enum(_) => todo!(),
-
-                            CConcreteType::Primitive(primitive) => match primitive {
-                                CPrimitive::Bool | CPrimitive::UnsignedChar => {
-                                    self.b.copy_byte(size, destination.location);
-                                }
-
-                                CPrimitive::Char | CPrimitive::SignedChar => {
-                                    self.b.copy_byte(size & 0x7f, destination.location);
-                                }
-
-                                CPrimitive::Short | CPrimitive::UnsignedShort => {
-                                    self.b.copy_word(size, destination.location);
-                                }
-
-                                CPrimitive::Int
-                                | CPrimitive::UnsignedInt
-                                | CPrimitive::Long
-                                | CPrimitive::UnsignedLong => {
-                                    self.b.copy_dword(size, destination.location);
-                                }
-
-                                CPrimitive::LongLong | CPrimitive::UnsignedLongLong => {
-                                    self.b.copy_qword(size, destination.location);
-                                }
-
-                                CPrimitive::Float | CPrimitive::Double | CPrimitive::LongDouble => {
-                                    self.b.copy_dword(size as f32, destination.location);
-                                }
-                            },
-                        }
-                    }
-
-                    CType::PointerTo(_, _) => {
-                        todo!("A pointer is not a valid assignment target for a number")
-                    }
-                };
+                self.evaluate_expression(&Expr::IntLiteral(size as i32), destination)?;
             }
 
             UnaryOp::BooleanNot => {
