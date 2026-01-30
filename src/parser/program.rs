@@ -105,6 +105,11 @@ impl Program {
             return Ok(existing_id);
         }
 
+        if cstruct.members.is_none() {
+            // Subsequent redeclaration of an existing struct.
+            return Ok(existing_id);
+        }
+
         Err(anyhow!("Tried to redefine struct `{name}` as `{cstruct:?}`, when it already has concrete definition `{existing_struct:?}`"))
     }
 
