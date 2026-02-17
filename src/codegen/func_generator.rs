@@ -1293,7 +1293,12 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         Ok(reg)
                     }
 
-                    Symbol::Var(_, _) => todo!(),
+                    Symbol::Var(_, _) => {
+                        let reg = self.reg();
+                        self.b.asm(format!("MOV {reg}, #var_{name}"));
+
+                        Ok(reg)
+                    }
                 }
             }
 
