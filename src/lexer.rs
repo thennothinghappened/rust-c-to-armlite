@@ -76,6 +76,19 @@ const KEYWORD_MAP: phf::Map<&'static str, TokenKind> = phf_map!(
     "nullptr" => TokenKind::NullPtr,
 );
 
+const SINGLE_CHARACTER_TOKEN_MAP: phf::Map<char, TokenKind> = phf_map!(
+    '{' => TokenKind::OpenCurly,
+    '}' => TokenKind::CloseCurly,
+    '(' => TokenKind::OpenParen,
+    ')' => TokenKind::CloseParen,
+    ';' => TokenKind::Semicolon,
+    '*' => TokenKind::Star,
+    ',' => TokenKind::Comma,
+    '<' => TokenKind::LessThan,
+    '>' => TokenKind::GreaterThan,
+    '?' => TokenKind::QuestionMark,
+);
+
 impl<'a> Lexer<'a> {
     pub fn new(context: Rc<Context<'a>>, source_id: SourceId) -> Self {
         Self {
@@ -124,19 +137,9 @@ impl<'a> Lexer<'a> {
             return TokenKind::Eof;
         };
 
-        if let Some(basic_token) = self.maybe_map_next_char(|char| match char {
-            '{' => Some(TokenKind::OpenCurly),
-            '}' => Some(TokenKind::CloseCurly),
-            '(' => Some(TokenKind::OpenParen),
-            ')' => Some(TokenKind::CloseParen),
-            ';' => Some(TokenKind::Semicolon),
-            '*' => Some(TokenKind::Star),
-            ',' => Some(TokenKind::Comma),
-            '<' => Some(TokenKind::LessThan),
-            '>' => Some(TokenKind::GreaterThan),
-            '?' => Some(TokenKind::QuestionMark),
-            _ => None,
-        }) {
+        if let Some(&basic_token) =
+            self.maybe_map_next_char(|char| SINGLE_CHARACTER_TOKEN_MAP.get(&char))
+        {
             return basic_token;
         }
 
