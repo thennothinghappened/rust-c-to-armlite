@@ -120,7 +120,12 @@ impl Generator {
                             )),
                         };
                     }
+
+                    b.append_doc_line("");
                 }
+
+                b.append_doc_line("# Returns");
+                b.append_doc_line(self.program.format_ctype(b.sig.returns));
 
                 if let Err(error) = FuncGenerator::new(&self, b).generate_func(cfunc) {
                     b.asm(format!("\nERROR!:\n{error:?}"));
