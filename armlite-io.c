@@ -3,42 +3,35 @@
 #include <armlite/armlite.h>
 #include <armlite/armlite-io.h>
 
-int PrintFormatted(char *format, int *argsArray)
-{
-	if (format == NULL)
-	{
+int PrintFormatted(char *format, int *argsArray) {
+	if (format == NULL) {
 		Panic("PrintFormatted :: Passed NULL as format specifier");
 	}
 
 	size_t argIndex = 0;
 	size_t charIndex = 0;
 
-	while (1)
-	{
+	for (;;) {
 		char c = format[charIndex];
 		
-		if (c == '\0')
-		{
+		if (c == '\0') {
 			break;
 		}
 
-		charIndex = charIndex + 1;
+		charIndex += 1;
 
-		if (c != '%')
-		{
+		if (c != '%') {
 			WriteChar(c);
 			continue;
 		}
 
 		c = format[charIndex];
 
-		if (argsArray == NULL)
-		{
+		if (argsArray == NULL) {
 			Panic("PrintFormatted :: Passed NULL as argument array pointer");
 		}
 
-		if (c == 'd')
-		{
+		if (c == 'd') {
 			// Next argument is a signed integer.
 			int number = argsArray[argIndex];
 			WriteSignedNum(number);
@@ -48,14 +41,12 @@ int PrintFormatted(char *format, int *argsArray)
 			// 	Panic("Not yet implemented");
 			// }
 
-			charIndex = charIndex + 1;
-		}
-		else
-		{
+			charIndex += 1;
+		} else {
 			Panic("Unknown format specifier encountered");
 		}
 
-		argIndex = argIndex + 1;
+		argIndex += 1;
 	}
 
 	return charIndex;
