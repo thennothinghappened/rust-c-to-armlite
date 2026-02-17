@@ -76,7 +76,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         let ctype = ctype.into();
 
         let size = self.generator.sizeof_ctype(ctype);
-        let actual_size = Self::align(size);
+        let actual_size = self.generator.align(size);
 
         // look for a free spot first before allocing.
         let mut offset = 0;
@@ -113,22 +113,6 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         self.b.sub(Reg::Sp, Reg::Sp, actual_size as i32);
 
         local
-    }
-
-    fn align<Scalar>(offset: Scalar) -> Scalar
-    where
-        Scalar: Shl<Output = Scalar>,
-        Scalar: Shr<Output = Scalar>,
-        Scalar: Ord,
-        Scalar: From<u8>,
-    {
-        let mut actual_offset: Scalar = (offset >> 2.into()) << 2.into();
-
-        if actual_offset < 4.into() {
-            actual_offset = 4.into();
-        }
-
-        actual_offset
     }
 
     /// Free a local variable on the stack. Its spot can now be recycled.
@@ -200,7 +184,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         }
 
         for arg in self.b.sig.args.iter() {
-            offset += Self::align(self.generator.sizeof_ctype(arg.ctype)) as i32;
+            offset += self.generator.align(self.generator.sizeof_ctype(arg.ctype)) as i32;
 
             if arg.name.as_deref() == Some(name) {
                 return Some(StackLocal {
@@ -264,7 +248,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     .sig
                     .args
                     .iter()
-                    .map(|arg| Self::align(self.generator.sizeof_ctype(arg.ctype)))
+                    .map(|arg| self.generator.align(self.generator.sizeof_ctype(arg.ctype)))
                     .sum::<u32>(),
             );
         }
@@ -1372,7 +1356,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         return Ok((*ctype, offset as i32));
                     }
 
-                    offset += Self::align(self.generator.sizeof_ctype(*ctype));
+                    offset += self.generator.align(self.generator.sizeof_ctype(*ctype));
                 }
 
                 bail!(

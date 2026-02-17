@@ -3,7 +3,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
-    ops::Not,
+    ops::{Not, Shl, Shr},
     rc::Rc,
     sync::LazyLock,
 };
@@ -179,7 +179,7 @@ impl Generator {
                     .map(|members| {
                         members
                             .iter()
-                            .map(|member| self.sizeof_ctype(member.ctype))
+                            .map(|member| self.align(self.sizeof_ctype(member.ctype)))
                             .sum()
                     })
                     .unwrap_or(0),
@@ -213,6 +213,22 @@ impl Generator {
             CPrimitive::Double => 4,
             CPrimitive::LongDouble => 4,
         }
+    }
+
+    pub fn align<Scalar>(&self, offset: Scalar) -> Scalar
+    where
+        Scalar: Shl<Output = Scalar>,
+        Scalar: Shr<Output = Scalar>,
+        Scalar: Ord,
+        Scalar: From<u8>,
+    {
+        let mut actual_offset: Scalar = (offset >> 2.into()) << 2.into();
+
+        if actual_offset < 4.into() {
+            actual_offset = 4.into();
+        }
+
+        actual_offset
     }
 }
 
