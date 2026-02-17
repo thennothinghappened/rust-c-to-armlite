@@ -625,6 +625,11 @@ impl<'a> Parser<'a> {
                 Ok(Expr::IntLiteral(int))
             }
 
+            TokenKind::BoolLiteral(bool) => {
+                self.next();
+                Ok(Expr::BoolLiteral(bool))
+            }
+
             TokenKind::NullPtr => {
                 self.next();
                 Ok(Expr::NullPtr)

@@ -9,6 +9,22 @@ pub enum Imm {
     StringId(StringId),
 }
 
+impl From<u8> for Imm {
+    fn from(value: u8) -> Self {
+        Imm::U32(value as u32)
+    }
+}
+
+impl From<bool> for Imm {
+    fn from(value: bool) -> Self {
+        if value {
+            Imm::U32(1)
+        } else {
+            Imm::U32(0)
+        }
+    }
+}
+
 impl From<i32> for Imm {
     fn from(value: i32) -> Self {
         Imm::I32(value)

@@ -283,6 +283,8 @@ impl<'a> Lexer<'a> {
                 "unsigned" => Some(TokenKind::Unsigned),
                 "signed" => Some(TokenKind::Signed),
                 "bool" => Some(TokenKind::Bool),
+                "true" => Some(TokenKind::BoolLiteral(true)),
+                "false" => Some(TokenKind::BoolLiteral(false)),
                 "int" => Some(TokenKind::Int),
                 "long" => Some(TokenKind::Long),
                 "short" => Some(TokenKind::Short),

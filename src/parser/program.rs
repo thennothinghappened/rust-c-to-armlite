@@ -347,6 +347,7 @@ impl Program {
         match expr {
             Expr::StringLiteral(_) => Ok(self.pointer_to(CPrimitive::Char)),
             Expr::IntLiteral(_) => Ok(CPrimitive::Int.into()),
+            Expr::BoolLiteral(_) => Ok(CPrimitive::Bool.into()),
             Expr::NullPtr => Ok(self.pointer_to(CConcreteType::Void)),
 
             Expr::Reference(name) => {

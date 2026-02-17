@@ -74,6 +74,18 @@ impl From<Reg> for Value {
     }
 }
 
+impl From<bool> for Value {
+    fn from(value: bool) -> Self {
+        Value::Imm(value.into())
+    }
+}
+
+impl From<u8> for Value {
+    fn from(value: u8) -> Self {
+        Value::Imm(value.into())
+    }
+}
+
 impl From<i32> for Value {
     fn from(value: i32) -> Self {
         Value::Imm(value.into())

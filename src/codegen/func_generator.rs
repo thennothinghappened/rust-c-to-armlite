@@ -13,6 +13,7 @@ use crate::{
         arm::{
             address::{Address, LiteralIndexAddress},
             location::Location,
+            value::ValueWidth,
         },
         func_builder::{FuncBuilder, LabelId},
         Generator, Reg, WORD_SIZE,
@@ -499,6 +500,42 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.copy_dword(*value, destination.location);
             }
 
+            Expr::BoolLiteral(value) => {
+                let CType::AsIs(cconcrete_type) = destination.ctype else {
+                    bail!("Can't coerce bool to pointer")
+                };
+
+                let cprimitive = match cconcrete_type {
+                    CConcreteType::Struct(_) => bail!("Can't coerce bool to struct"),
+                    CConcreteType::Func(_) => bail!("Can't coerce bool to function pointer"),
+                    CConcreteType::Enum(_cenum_id) => todo!(),
+                    CConcreteType::Primitive(cprimitive) => cprimitive,
+                    CConcreteType::Void => return Ok(()),
+                };
+
+                match cprimitive {
+                    CPrimitive::Bool
+                    | CPrimitive::Char
+                    | CPrimitive::SignedChar
+                    | CPrimitive::UnsignedChar => self.b.copy_byte(*value, destination.location),
+
+                    CPrimitive::Short | CPrimitive::UnsignedShort => {
+                        self.b.copy_word(*value, destination.location)
+                    }
+
+                    CPrimitive::Int
+                    | CPrimitive::UnsignedInt
+                    | CPrimitive::Long
+                    | CPrimitive::UnsignedLong => self.b.copy_dword(*value, destination.location),
+
+                    CPrimitive::LongLong => todo!(),
+                    CPrimitive::UnsignedLongLong => todo!(),
+                    CPrimitive::Float => todo!(),
+                    CPrimitive::Double => todo!(),
+                    CPrimitive::LongDouble => todo!(),
+                }
+            }
+
             Expr::NullPtr => match destination.ctype {
                 CType::AsIs(CConcreteType::Void) => (),
 
@@ -802,6 +839,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             BinaryOp::Assign => match left {
                 Expr::StringLiteral(_) => bail!("A string is not an assignment target"),
                 Expr::IntLiteral(_) => bail!("A number is not an assignment target"),
+                Expr::BoolLiteral(_) => bail!("A boolean is not an assignment target"),
                 Expr::Call(_) => bail!("A function call is not an assignment target"),
                 Expr::NullPtr => bail!("nullptr is not an assignment target"),
 
