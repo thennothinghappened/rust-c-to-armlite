@@ -45,7 +45,7 @@ pub struct Lexer<'a> {
     if_stack_depth: usize,
 }
 
-const TOKEN_MAP: phf::Map<&'static str, TokenKind> = phf_map!(
+const KEYWORD_MAP: phf::Map<&'static str, TokenKind> = phf_map!(
     "if" => TokenKind::If,
     "else" => TokenKind::Else,
     "while" => TokenKind::While,
@@ -300,7 +300,7 @@ impl<'a> Lexer<'a> {
         if char == '_' || char.is_alphabetic() {
             let str = self.take_chars_while(is_valid_identifier);
 
-            if let Some(&token) = TOKEN_MAP.get(str) {
+            if let Some(&token) = KEYWORD_MAP.get(str) {
                 return token;
             }
 
