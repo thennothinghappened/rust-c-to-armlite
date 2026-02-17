@@ -87,6 +87,7 @@ const SINGLE_CHARACTER_TOKEN_MAP: phf::Map<char, TokenKind> = phf_map!(
     '<' => TokenKind::LessThan,
     '>' => TokenKind::GreaterThan,
     '?' => TokenKind::QuestionMark,
+    '.' => TokenKind::DotAccessor,
 );
 
 impl<'a> Lexer<'a> {

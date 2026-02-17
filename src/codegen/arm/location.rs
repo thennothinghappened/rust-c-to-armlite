@@ -30,6 +30,12 @@ impl From<Address> for Location {
     }
 }
 
+impl From<LiteralIndexAddress> for Location {
+    fn from(value: LiteralIndexAddress) -> Self {
+        Location::Address(value.into())
+    }
+}
+
 impl From<Reg> for Location {
     fn from(value: Reg) -> Self {
         Location::Reg(value)

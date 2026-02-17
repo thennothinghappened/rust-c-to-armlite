@@ -15,6 +15,7 @@ pub enum Expr {
     BinaryOp(BinaryOp, Box<Expr>, Box<Expr>),
     UnaryOp(UnaryOp, Box<Expr>),
     Cast(Box<Expr>, CType),
+    DotAccess { target: Box<Expr>, member: String },
 }
 
 pub trait BindingPower {
@@ -202,6 +203,8 @@ impl Display for Expr {
                 UnaryOp::AddressOf => write!(f, "&{expr}"),
                 UnaryOp::Dereference => write!(f, "*{expr}"),
             },
+
+            Expr::DotAccess { target, member } => write!(f, "{target}.{member}"),
         }
     }
 }

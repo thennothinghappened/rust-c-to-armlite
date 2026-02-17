@@ -5,7 +5,7 @@ use std::{
     fmt::Display,
 };
 
-use anyhow::{anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use indexmap::IndexMap;
 use itertools::Itertools;
 use thiserror::Error;
@@ -426,6 +426,33 @@ impl Program {
             // should define a stricter ast that simply doesn't allow invalid constructs, like
             // casting a struct to a number, for instance.
             Expr::Cast(expr, ctype) => Ok(*ctype),
+
+            Expr::DotAccess { target, member } => match self.type_of_expr(scope, target)? {
+                struct_ctype @ CType::AsIs(CConcreteType::Struct(id)) => {
+                    let cstruct = self.get_struct(id);
+
+                    let Some(members) = &cstruct.members else {
+                        bail!("Cannot access members of an opaque struct type")
+                    };
+
+                    for Member {
+                        name: member_name,
+                        ctype,
+                    } in members
+                    {
+                        if member_name.as_deref() == Some(member) {
+                            return Ok(*ctype);
+                        }
+                    }
+
+                    bail!(
+                        "Struct type `{}` has no member named {member}",
+                        self.format_ctype(struct_ctype)
+                    )
+                }
+
+                ctype => bail!("Cannot dot access type {}", self.format_ctype(ctype)),
+            },
         }
     }
 

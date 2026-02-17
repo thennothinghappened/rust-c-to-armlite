@@ -5,6 +5,7 @@ use crate::lexer::Token;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum TokenKind {
     Semicolon,
+    DotAccessor,
     OpenParen,
     CloseParen,
     OpenCurly,
@@ -86,6 +87,7 @@ impl Display for TokenKind {
             "{}",
             match self {
                 TokenKind::Semicolon => ";",
+                TokenKind::DotAccessor => ".",
                 TokenKind::OpenParen => "(",
                 TokenKind::CloseParen => ")",
                 TokenKind::OpenCurly => "{",

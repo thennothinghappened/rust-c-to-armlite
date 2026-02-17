@@ -575,7 +575,12 @@ impl<'a> FuncBuilder<'a> {
 
         match addr {
             Address::LiteralIndex(LiteralIndexAddress { base, offset: 0 }) => match extra_offset {
-                0 => self.move_dword(dest, base),
+                0 => {
+                    // If we've simplified this to MOV src, src, don't bother doing anything.
+                    if base != dest {
+                        self.move_dword(dest, base)
+                    }
+                }
                 _ => self.load_address(dest, base + extra_offset, 0),
             },
 

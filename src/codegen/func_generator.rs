@@ -19,7 +19,7 @@ use crate::{
         Generator, Reg, WORD_SIZE,
     },
     parser::program::{
-        ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType},
+        ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType, CTypeId, Member},
         expr::{self, call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
         statement::{Block, Statement},
         ExecutionScope, Symbol,
@@ -603,7 +603,18 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
             Expr::UnaryOp(op, expr) => self.evaluate_unary_op(*op, expr, destination)?,
 
-            Expr::Cast(expr, _) => todo!(),
+            Expr::Cast(expr, _) => {
+                // Casting is just more persuasive type coercion. Our compiler doesn't really care
+                // about type compatibility much, so casting is generally a no-op :P
+                return self.evaluate_expression(expr, destination);
+            }
+
+            Expr::DotAccess { target, member } => {
+                let (member_ctype, member_address) =
+                    self.calculate_member_address(target, member)?;
+                self.copy_lvalue(member_address.with_ctype(member_ctype), destination)?;
+                self.release_reg(member_address.base);
+            }
         };
 
         Ok(())
@@ -877,6 +888,16 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     };
                 }
 
+                Expr::DotAccess { target, member } => {
+                    let (member_ctype, address) = self.calculate_member_address(target, member)?;
+                    let member_location = address.with_ctype(member_ctype);
+
+                    self.evaluate_expression(right, member_location)?;
+                    self.copy_lvalue(member_location, destination)?;
+
+                    self.release_reg(address.base);
+                }
+
                 Expr::BinaryOp(BinaryOp::ArrayIndex, target_expr, index_expr) => {
                     let CType::PointerTo(element_ctype_id, _) = self.type_of_expr(target_expr)?
                     else {
@@ -935,10 +956,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             },
 
             BinaryOp::OpAndAssign(op) => {
-                let address_reg = self.address_of(left)?;
+                let address = self.address_of(left)?;
 
                 let target_ctype = self.type_of_expr(left)?;
-                let target_location = TypedLocation::new(target_ctype, Address::at(address_reg));
+                let target_location = TypedLocation::new(target_ctype, address);
 
                 self.evauluate_binary_op(target_location, *op, left, right)?;
 
@@ -946,7 +967,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.copy_lvalue(target_location, destination)?;
                 }
 
-                self.release_reg(address_reg);
+                self.release_reg(address.base);
             }
 
             BinaryOp::LogicEqual(mode) => {
@@ -1234,11 +1255,19 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             }
 
             UnaryOp::AddressOf => {
-                let address_reg = self.address_of(expr)?;
-                let pointer_type = self.generator.program.pointer_to(self.type_of_expr(expr)?);
+                let pointer_ctype = self.generator.program.pointer_to(self.type_of_expr(expr)?);
+                let address = self.address_of(expr)?;
 
-                self.copy_lvalue(TypedLocation::new(pointer_type, address_reg), destination)?;
-                self.release_reg(address_reg);
+                // "Pack" the address into the register so that value is an lvalue that we can copy
+                // to the destination.
+                self.b.load_address(address.base, address, 0);
+
+                self.copy_lvalue(
+                    Location::Reg(address.base).with_ctype(pointer_ctype),
+                    destination,
+                )?;
+
+                self.release_reg(address.base);
             }
 
             UnaryOp::Dereference => {
@@ -1309,14 +1338,67 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         Ok((element_ctype, ele_pointer))
     }
 
-    fn address_of(&mut self, target: &Expr) -> anyhow::Result<Reg> {
+    fn calculate_member_address(
+        &mut self,
+        target: &Expr,
+        member: &str,
+    ) -> anyhow::Result<(CType, LiteralIndexAddress)> {
+        let (ctype, offset) = self.calculate_member_offset(target, member)?;
+
+        let mut address = self.address_of(target)?;
+        address.offset += offset;
+
+        Ok((ctype, address))
+    }
+
+    fn calculate_member_offset(&self, target: &Expr, member: &str) -> anyhow::Result<(CType, i32)> {
+        // TODO: Support unions, which are just structs but with offset 0 every time :D
+        match self.type_of_expr(target)? {
+            struct_ctype @ CType::AsIs(CConcreteType::Struct(id)) => {
+                let cstruct = self.generator.program.get_struct(id);
+
+                let Some(members) = &cstruct.members else {
+                    bail!("Cannot access members of an opaque struct type")
+                };
+
+                let mut offset = 0;
+
+                for Member {
+                    name: member_name,
+                    ctype,
+                } in members
+                {
+                    if member_name.as_deref() == Some(member) {
+                        return Ok((*ctype, offset as i32));
+                    }
+
+                    offset += Self::align(self.generator.sizeof_ctype(*ctype));
+                }
+
+                bail!(
+                    "Struct type `{}` has no member named {member}",
+                    self.generator.program.format_ctype(struct_ctype)
+                )
+            }
+
+            ctype => bail!(
+                "Cannot dot access type {}",
+                self.generator.program.format_ctype(ctype)
+            ),
+        }
+    }
+
+    fn address_of(&mut self, target: &Expr) -> anyhow::Result<LiteralIndexAddress> {
         match target {
             Expr::Reference(name) => {
                 if let Some(var) = self.get_localvar(name) {
                     let reg = self.reg();
                     self.b.load_address(reg, var, 0);
 
-                    return Ok(reg);
+                    return Ok(LiteralIndexAddress {
+                        base: reg,
+                        offset: 0,
+                    });
                 }
 
                 let Some(symbol) = self.generator.program.get_symbol_by_name(name) else {
@@ -1328,14 +1410,20 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         let reg = self.reg();
                         self.b.asm(format!("MOV {reg}, #fn_{name}"));
 
-                        Ok(reg)
+                        Ok(LiteralIndexAddress {
+                            base: reg,
+                            offset: 0,
+                        })
                     }
 
                     Symbol::Var(_, _) => {
                         let reg = self.reg();
                         self.b.asm(format!("MOV {reg}, #var_{name}"));
 
-                        Ok(reg)
+                        Ok(LiteralIndexAddress {
+                            base: reg,
+                            offset: 0,
+                        })
                     }
                 }
             }
@@ -1402,6 +1490,18 @@ impl TypedLocation {
 }
 
 impl Address {
+    fn with_ctype(self, ctype: CType) -> TypedLocation {
+        TypedLocation::new(ctype, self)
+    }
+}
+
+impl Location {
+    fn with_ctype(self, ctype: CType) -> TypedLocation {
+        TypedLocation::new(ctype, self)
+    }
+}
+
+impl LiteralIndexAddress {
     fn with_ctype(self, ctype: CType) -> TypedLocation {
         TypedLocation::new(ctype, self)
     }
