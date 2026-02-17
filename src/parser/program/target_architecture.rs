@@ -27,7 +27,7 @@ impl TargetArchitecture {
     pub const fn primitive_byte_size(&self, primitive: CPrimitive) -> u32 {
         match self {
             TargetArchitecture::ArmLite | TargetArchitecture::ArmV7 => match primitive {
-                CPrimitive::Bool => 0,
+                CPrimitive::Bool => 1,
                 CPrimitive::Char => 1,
                 CPrimitive::SignedChar => 1,
                 CPrimitive::UnsignedChar => 1,

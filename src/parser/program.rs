@@ -53,13 +53,13 @@ pub struct Program {
     ctypes: RefCell<HashMap<CTypeId, CType>>,
     next_ctype_id: Cell<CTypeId>,
 
-    target: TargetArchitecture,
+    pub arch: TargetArchitecture,
 }
 
 impl Program {
     pub fn new(target: TargetArchitecture) -> Self {
         let mut this = Self {
-            target,
+            arch: target,
             ..Default::default()
         };
 
@@ -513,7 +513,7 @@ impl Program {
             (false, false) => (self.promote_integer(a), self.promote_integer(b)),
         };
 
-        if self.target.rank_of_primitive(promoted_a) > self.target.rank_of_primitive(promoted_b) {
+        if self.arch.rank_of_primitive(promoted_a) > self.arch.rank_of_primitive(promoted_b) {
             promoted_a
         } else {
             promoted_b
@@ -528,7 +528,7 @@ impl Program {
             "Shouldn't pass a non-integer primitive type to promotion"
         );
 
-        if self.target.rank_of_primitive(integer) < self.target.rank_of_primitive(CPrimitive::Int) {
+        if self.arch.rank_of_primitive(integer) < self.arch.rank_of_primitive(CPrimitive::Int) {
             match self.is_signed_primitive(integer) {
                 true => CPrimitive::Int,
                 false => CPrimitive::UnsignedInt,

@@ -196,23 +196,7 @@ impl Generator {
     }
 
     fn sizeof_primitive(&self, primitive: CPrimitive) -> u32 {
-        match primitive {
-            CPrimitive::Bool => 1,
-            CPrimitive::Char => 1,
-            CPrimitive::SignedChar => 1,
-            CPrimitive::UnsignedChar => 1,
-            CPrimitive::Short => 2,
-            CPrimitive::UnsignedShort => 2,
-            CPrimitive::Int => WORD_SIZE,
-            CPrimitive::UnsignedInt => WORD_SIZE,
-            CPrimitive::Long => WORD_SIZE,
-            CPrimitive::UnsignedLong => WORD_SIZE,
-            CPrimitive::LongLong => 8,
-            CPrimitive::UnsignedLongLong => 8,
-            CPrimitive::Float => 2,
-            CPrimitive::Double => 4,
-            CPrimitive::LongDouble => 4,
-        }
+        self.program.arch.primitive_byte_size(primitive)
     }
 
     pub fn align<Scalar>(&self, offset: Scalar) -> Scalar
