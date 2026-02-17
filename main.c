@@ -1,10 +1,15 @@
 
 #include <armlite/armlite-io.h>
 
+int g_stuff;
+
 int main()
 {
-	int num = 3;
-	PrintFormatted("uwu %d\n", &num);
+	g_stuff = 5;
+
+	int args[1];
+	args[0] = g_stuff;
+	PrintFormatted("uwu %d\n", args);
 
 	return 0;
 }

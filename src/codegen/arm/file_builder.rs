@@ -72,7 +72,8 @@ impl FileBuilder {
         output += "\n.DATA\n";
 
         for (name, size) in self.global_vars.into_inner() {
-            output += &format!("var_{name}: .BLOCK {size}");
+            output += ".ALIGN 4\n";
+            output += &format!("var_{name}: .BLOCK {size}\n");
         }
 
         if !output.ends_with('\n') {

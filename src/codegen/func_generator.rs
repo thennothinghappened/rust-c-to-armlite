@@ -547,7 +547,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     }
 
                     Symbol::Var(var_ctype, _) => {
-                        self.b.asm(format!("MOV {reg}, var_{name}"));
+                        self.b.asm(format!("MOV {reg}, #var_{name}"));
                         self.copy_lvalue(
                             TypedLocation::new(*var_ctype, Address::at(reg)),
                             destination,
@@ -816,7 +816,27 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         return Ok(());
                     }
 
-                    bail!("Bad assignment target: undeclared variable `{name}`")
+                    let Some(symbol) = self.generator.program.get_symbol_by_name(name) else {
+                        bail!("Bad assignment target: undeclared variable `{name}`")
+                    };
+
+                    match symbol {
+                        Symbol::Func(cfunc) => {
+                            bail!("Function `{name}` is not an assignment target")
+                        }
+
+                        Symbol::Var(var_ctype, _) => {
+                            let target_address_reg = self.reg();
+                            let target_location =
+                                TypedLocation::new(*var_ctype, Address::at(target_address_reg));
+
+                            self.b.asm(format!("MOV {target_address_reg}, #var_{name}"));
+                            self.evaluate_expression(right, target_location)?;
+                            self.copy_lvalue(target_location, destination)?;
+
+                            self.release_reg(target_address_reg);
+                        }
+                    };
                 }
 
                 Expr::BinaryOp(BinaryOp::ArrayIndex, target_expr, index_expr) => {

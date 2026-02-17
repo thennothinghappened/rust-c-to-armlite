@@ -86,6 +86,15 @@ impl Generator {
             },
         );
 
+        for (name, (ctype, value)) in self.program.get_global_variables() {
+            self.file_builder
+                .create_global(name, self.sizeof_ctype(*ctype));
+
+            if let Some(value) = value {
+                todo!("Global variable initialization")
+            }
+        }
+
         let mut failures = Vec::<(&str, anyhow::Error)>::new();
 
         for (name, cfunc) in self
