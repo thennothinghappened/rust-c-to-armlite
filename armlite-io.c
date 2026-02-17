@@ -10,11 +10,6 @@ int PrintFormatted(char *format, int *argsArray)
 		Panic("PrintFormatted :: Passed NULL as format specifier");
 	}
 
-	if (argsArray == NULL)
-	{
-		Panic("PrintFormatted :: Passed NULL as argument array pointer");
-	}
-
 	size_t argIndex = 0;
 	size_t charIndex = 0;
 
@@ -36,6 +31,11 @@ int PrintFormatted(char *format, int *argsArray)
 		}
 
 		c = format[charIndex];
+
+		if (argsArray == NULL)
+		{
+			Panic("PrintFormatted :: Passed NULL as argument array pointer");
+		}
 
 		if (c == 'd')
 		{
