@@ -7,6 +7,7 @@ use std::{
     str::Chars,
 };
 
+use phf::phf_map;
 use thiserror::Error;
 
 use crate::{
@@ -43,6 +44,37 @@ pub struct Lexer<'a> {
     pub context: Rc<Context<'a>>,
     if_stack_depth: usize,
 }
+
+const TOKEN_MAP: phf::Map<&'static str, TokenKind> = phf_map!(
+    "if" => TokenKind::If,
+    "else" => TokenKind::Else,
+    "while" => TokenKind::While,
+    "for" => TokenKind::For,
+    "return" => TokenKind::Return,
+    "break" => TokenKind::Break,
+    "continue" => TokenKind::Continue,
+    "struct" => TokenKind::Struct,
+    "typedef" => TokenKind::TypeDef,
+    "union" => TokenKind::Union,
+    "enum" => TokenKind::Enum,
+    "unsigned" => TokenKind::Unsigned,
+    "signed" => TokenKind::Signed,
+    "bool" => TokenKind::Bool,
+    "true" => TokenKind::BoolLiteral(true),
+    "false" => TokenKind::BoolLiteral(false),
+    "int" => TokenKind::Int,
+    "long" => TokenKind::Long,
+    "short" => TokenKind::Short,
+    "char" => TokenKind::Char,
+    "float" => TokenKind::Float,
+    "double" => TokenKind::Double,
+    "void" => TokenKind::Void,
+    "sizeof" => TokenKind::SizeOf,
+    "const" => TokenKind::Const,
+    "extern" => TokenKind::Extern,
+    "__asm__" => TokenKind::Asm,
+    "nullptr" => TokenKind::NullPtr,
+);
 
 impl<'a> Lexer<'a> {
     pub fn new(context: Rc<Context<'a>>, source_id: SourceId) -> Self {
@@ -268,37 +300,7 @@ impl<'a> Lexer<'a> {
         if char == '_' || char.is_alphabetic() {
             let str = self.take_chars_while(is_valid_identifier);
 
-            if let Some(token) = match str {
-                "if" => Some(TokenKind::If),
-                "else" => Some(TokenKind::Else),
-                "while" => Some(TokenKind::While),
-                "for" => Some(TokenKind::For),
-                "return" => Some(TokenKind::Return),
-                "break" => Some(TokenKind::Break),
-                "continue" => Some(TokenKind::Continue),
-                "struct" => Some(TokenKind::Struct),
-                "typedef" => Some(TokenKind::TypeDef),
-                "union" => Some(TokenKind::Union),
-                "enum" => Some(TokenKind::Enum),
-                "unsigned" => Some(TokenKind::Unsigned),
-                "signed" => Some(TokenKind::Signed),
-                "bool" => Some(TokenKind::Bool),
-                "true" => Some(TokenKind::BoolLiteral(true)),
-                "false" => Some(TokenKind::BoolLiteral(false)),
-                "int" => Some(TokenKind::Int),
-                "long" => Some(TokenKind::Long),
-                "short" => Some(TokenKind::Short),
-                "char" => Some(TokenKind::Char),
-                "float" => Some(TokenKind::Float),
-                "double" => Some(TokenKind::Double),
-                "void" => Some(TokenKind::Void),
-                "sizeof" => Some(TokenKind::SizeOf),
-                "const" => Some(TokenKind::Const),
-                "extern" => Some(TokenKind::Extern),
-                "__asm__" => Some(TokenKind::Asm),
-                "nullptr" => Some(TokenKind::NullPtr),
-                _ => None,
-            } {
+            if let Some(&token) = TOKEN_MAP.get(str) {
                 return token;
             }
 
