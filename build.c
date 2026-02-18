@@ -3,7 +3,11 @@
 // the order in which they should be compiled.
 // 
 
+#ifdef __armlitec__
 #include "stdlib/src/string.c"
+#include "stdlib/src/stdlib.c"
+#endif
+
 #include "armlite.c"
 #include "armlite-io.c"
 #include "main.c"

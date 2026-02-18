@@ -1,6 +1,8 @@
 
+#include <armlite/armlite.h>
 #include <armlite/armlite-io.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 int g_stuff;
 bool g_whatever;
@@ -24,6 +26,16 @@ int main()
 	if (g_whatever) {
 		PrintFormatted("uwu %d\n", &g_stuff);
 	}
+
+	Point2D *a = malloc(sizeof(*a));
+	(*a).x = 3;
+
+	PrintFormatted("Example position a = (%d, %d)", (int*)a);
+
+	free(a);
+
+	// String str;
+	// str.buffer = ;
 
 	return 0;
 }
