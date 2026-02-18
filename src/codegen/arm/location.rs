@@ -1,7 +1,7 @@
 use crate::codegen::arm::{address::LiteralIndexAddress, reg::Reg, value::Value, Address};
 
 /// Somewhere that holds a value.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Location {
     Address(Address),
     Reg(Reg),

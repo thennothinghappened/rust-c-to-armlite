@@ -8,7 +8,8 @@ use crate::{
         block_builder::BlockBuilder,
         program::{
             ctype::{
-                CConcreteType, CFunc, CFuncBody, CPrimitive, CSig, CSigId, CStruct, CType, Member,
+                CConcreteType, CFunc, CFuncBody, CPrimitive, CSig, CSigId, CStruct, CStructKind,
+                CType, Member,
             },
             expr::{call::Call, BinaryOp, BindingPower, CompareMode, Expr, OrderMode, UnaryOp},
             statement::{Block, Statement, Variable},
@@ -678,8 +679,12 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn parse_struct(&mut self) -> Result<CType, ParseError> {
-        let start = self.expect(TokenKind::Struct)?;
+    fn parse_struct_or_union(&mut self, kind: CStructKind) -> Result<CType, ParseError> {
+        let start = self.expect(match kind {
+            CStructKind::Struct => TokenKind::Struct,
+            CStructKind::Union => TokenKind::Union,
+        })?;
+
         let struct_name = self.accept_ident();
 
         if !self.accept(TokenKind::OpenCurly) {
@@ -693,12 +698,12 @@ impl<'a> Parser<'a> {
             // Opaque struct.
             return self
                 .program
-                .create_struct(struct_name, CStruct::opaque())
+                .create_struct(struct_name, CStruct::opaque(kind))
                 .map(|id| CType::AsIs(id.into()))
                 .map_err(|err| self.bad_definition(start.until(self.lexer.index), err));
         }
 
-        let mut builder = StructBuilder::new();
+        let mut builder = StructBuilder::new(kind);
 
         while !self.accept(TokenKind::CloseCurly) {
             // Parse each member!
@@ -746,7 +751,8 @@ impl<'a> Parser<'a> {
 
         match self.peek().kind {
             // Inline struct type.
-            TokenKind::Struct => self.parse_struct(),
+            TokenKind::Struct => self.parse_struct_or_union(CStructKind::Struct),
+            TokenKind::Union => self.parse_struct_or_union(CStructKind::Union),
 
             // Typedef'd something-or-other!
             TokenKind::Ident(id) => {

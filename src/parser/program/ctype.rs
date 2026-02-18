@@ -233,11 +233,21 @@ pub enum CFuncBody {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CStruct {
     pub members: Option<Vec<Member>>,
+    pub kind: CStructKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CStructKind {
+    Struct,
+    Union,
 }
 
 impl CStruct {
-    pub fn opaque() -> Self {
-        Self { members: None }
+    pub fn opaque(kind: CStructKind) -> Self {
+        Self {
+            members: None,
+            kind,
+        }
     }
 }
 

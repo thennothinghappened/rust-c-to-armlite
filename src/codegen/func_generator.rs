@@ -20,7 +20,9 @@ use crate::{
         Generator, Reg, WORD_SIZE,
     },
     parser::program::{
-        ctype::{self, CConcreteType, CFunc, CFuncBody, CPrimitive, CType, CTypeId, Member},
+        ctype::{
+            self, CConcreteType, CFunc, CFuncBody, CPrimitive, CStructKind, CType, CTypeId, Member,
+        },
         expr::{self, call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
         statement::{Block, Statement, Variable},
         ExecutionScope, Symbol,
@@ -622,6 +624,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             return Ok(());
         }
 
+        self.b
+            .comment(format!("copy_lvalue: {source:?} -> {destination:?}"));
+
         match (source.ctype, destination.ctype) {
             (CType::AsIs(source_concrete), CType::AsIs(destination_concrete))
                 if source_concrete == destination_concrete =>
@@ -647,8 +652,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             ) {
                 (true, true) => {
                     let source_size = self.generator.sizeof_ctype(source_primitive);
-
                     let destination_size = self.generator.sizeof_ctype(destination_primitive);
+
+                    self.b.header(format!(
+                        "Casting value with size {source_size} to {destination_size}"
+                    ));
 
                     match (source_size, destination_size) {
                         (1, 1) | (2, 2) | (4, 4) | (8, 8) => {
@@ -695,8 +703,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             }
 
             (CType::AsIs(_), CType::AsIs(_)) => {
-                // FIXME: Blindly reinterpreting the source type as the destination type, this will
-                // cause problems!!
+                self.b.header("FIXME: Blindly reinterpreting the source type as the destination type, this will cause problems!!");
                 self.b.copy_bytes(
                     source.location,
                     destination.location,
@@ -1365,7 +1372,6 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     }
 
     fn calculate_member_offset(&self, target: &Expr, member: &str) -> anyhow::Result<(CType, i32)> {
-        // TODO: Support unions, which are just structs but with offset 0 every time :D
         match self.type_of_expr(target)? {
             struct_ctype @ CType::AsIs(CConcreteType::Struct(id)) => {
                 let cstruct = self.generator.program.get_struct(id);
@@ -1385,7 +1391,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         return Ok((*ctype, offset as i32));
                     }
 
-                    offset += self.generator.align(self.generator.sizeof_ctype(*ctype));
+                    if matches!(cstruct.kind, CStructKind::Struct) {
+                        offset += self.generator.align(self.generator.sizeof_ctype(*ctype));
+                    }
                 }
 
                 bail!(
@@ -1519,7 +1527,7 @@ const fn stack_offset(offset: i32) -> Address {
     Address::offset(Reg::R11, offset)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct TypedLocation {
     ctype: CType,
     location: Location,

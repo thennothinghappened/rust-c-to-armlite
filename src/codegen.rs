@@ -20,7 +20,7 @@ use crate::{
     },
     context::Context,
     parser::program::{
-        ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CSig, CType, CTypeId},
+        ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CSig, CStructKind, CType, CTypeId},
         expr::{call::Call, BinaryOp, Expr, UnaryOp},
         statement::{Block, Statement, Variable},
         Program, Symbol,
@@ -176,18 +176,24 @@ impl Generator {
             }
 
             CType::AsIs(concrete) => match concrete {
-                CConcreteType::Struct(cstruct_id) => self
-                    .program
-                    .get_struct(cstruct_id)
-                    .members
-                    .as_ref()
-                    .map(|members| {
-                        members
-                            .iter()
-                            .map(|member| self.align(self.sizeof_ctype(member.ctype)))
-                            .sum()
-                    })
-                    .unwrap_or(0),
+                CConcreteType::Struct(cstruct_id) => {
+                    let cstruct = self.program.get_struct(cstruct_id);
+
+                    cstruct
+                        .members
+                        .as_ref()
+                        .map(|members| {
+                            let member_sizes = members
+                                .iter()
+                                .map(|member| self.align(self.sizeof_ctype(member.ctype)));
+
+                            match cstruct.kind {
+                                CStructKind::Struct => member_sizes.sum(),
+                                CStructKind::Union => member_sizes.max().unwrap_or(0),
+                            }
+                        })
+                        .unwrap_or(0)
+                }
 
                 CConcreteType::Enum(cenum_id) => WORD_SIZE,
                 CConcreteType::Func(_) => WORD_SIZE,

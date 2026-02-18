@@ -16,7 +16,7 @@ use crate::{
     parser::program::{
         ctype::{
             CConcreteType, CEnum, CEnumId, CFunc, CFuncBody, CPrimitive, CSig, CSigId, CStruct,
-            CStructId, CType, CTypeId, Member,
+            CStructId, CStructKind, CType, CTypeId, Member,
         },
         expr::{BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
         source_writer::SourceWriter,
@@ -557,18 +557,21 @@ impl Display for Program {
 
 pub struct StructBuilder {
     members: Vec<Member>,
+    kind: CStructKind,
 }
 
 impl StructBuilder {
-    pub fn new() -> Self {
+    pub fn new(kind: CStructKind) -> Self {
         Self {
             members: Vec::default(),
+            kind,
         }
     }
 
     pub fn build(self) -> CStruct {
         CStruct {
             members: Some(self.members),
+            kind: self.kind,
         }
     }
 

@@ -2,20 +2,20 @@ use std::ops::{Add, Sub};
 
 use crate::codegen::arm::reg::Reg;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Address {
     RelativeIndex(RelativeIndexAddress),
     LiteralIndex(LiteralIndexAddress),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct RelativeIndexAddress {
     pub base: Reg,
     pub offset: Reg,
     pub negate_offset: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct LiteralIndexAddress {
     pub base: Reg,
     pub offset: i32,
