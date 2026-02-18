@@ -234,6 +234,7 @@ impl<'a> Lexer<'a> {
             if let Some(kind) = self.maybe_map_next_char(|char| match char {
                 '-' => Some(TokenKind::MinusMinus),
                 '=' => Some(TokenKind::MinusAssign),
+                '>' => Some(TokenKind::ArrowAccessor),
                 _ => None,
             }) {
                 return kind;

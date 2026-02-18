@@ -603,6 +603,17 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            if self.accept(TokenKind::ArrowAccessor) {
+                let member_name = self.consume_ident()?;
+
+                operand = Expr::DotAccess {
+                    target: Box::new(Expr::UnaryOp(UnaryOp::Dereference, Box::new(operand))),
+                    member: member_name,
+                };
+
+                continue;
+            }
+
             break;
         }
 

@@ -28,7 +28,7 @@ int main()
 	}
 
 	Point2D *a = malloc(sizeof(*a));
-	(*a).x = 3;
+	a->x = 3;
 
 	PrintFormatted("Example position a = (%d, %d)", (int*)a);
 
