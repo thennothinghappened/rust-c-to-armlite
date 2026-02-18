@@ -468,7 +468,12 @@ impl<'a> FuncBuilder<'a> {
     }
 
     pub fn label(&mut self, id: LabelId) {
-        let Some(Inst::Label(canonical_id)) = self.instructions.last() else {
+        let Some(Inst::Label(canonical_id)) = self
+            .instructions
+            .iter()
+            .rev()
+            .find(|inst| !matches!(inst, Inst::Comment(_, _)))
+        else {
             self.append(Inst::Label(id));
             return;
         };
