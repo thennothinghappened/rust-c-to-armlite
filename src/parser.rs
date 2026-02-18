@@ -626,7 +626,7 @@ impl<'a> Parser<'a> {
         let target_type = self.parse_type_pointersssss(initial_type)?;
         self.expect(TokenKind::CloseParen)?;
 
-        let expr = self.parse_expr(0)?;
+        let expr = self.parse_expr(BinaryOp::AndThen.binding_strength() + 1)?;
         Ok(Expr::Cast(Box::new(expr), target_type))
     }
 
