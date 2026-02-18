@@ -3,7 +3,7 @@
 #include <armlite/armlite.h>
 #include <armlite/armlite-io.h>
 
-int PrintFormatted(char *format, int *argsArray) {
+size_t PrintFormatted(char *format, int *argsArray) {
 	if (format == NULL) {
 		Panic("PrintFormatted :: Passed NULL as format specifier");
 	}

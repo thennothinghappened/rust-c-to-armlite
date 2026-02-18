@@ -1,4 +1,6 @@
 
 #pragma once
 
-int PrintFormatted(char *format, int *argsArray);
+#include <stddef.h>
+
+size_t PrintFormatted(char *format, int *argsArray);
