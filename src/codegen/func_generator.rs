@@ -624,9 +624,6 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             return Ok(());
         }
 
-        self.b
-            .comment(format!("copy_lvalue: {source:?} -> {destination:?}"));
-
         match (source.ctype, destination.ctype) {
             (CType::AsIs(source_concrete), CType::AsIs(destination_concrete))
                 if source_concrete == destination_concrete =>
