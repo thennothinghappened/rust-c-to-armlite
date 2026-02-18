@@ -742,6 +742,8 @@ impl<'a> Parser<'a> {
     /// variable (or what have you), as the "*" part of the type is right-associative *for some
     /// reason*.
     fn parse_type(&mut self) -> Result<CType, ParseError> {
+        let _is_const = self.accept(TokenKind::Const);
+
         match self.peek().kind {
             // Inline struct type.
             TokenKind::Struct => self.parse_struct(),
