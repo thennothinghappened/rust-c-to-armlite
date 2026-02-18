@@ -12,6 +12,8 @@ pub enum TargetArchitecture {
 impl TargetArchitecture {
     /// 32-bit ARM exact-size type definitions.
     const ARM32_TYPE_ALIASES: phf::Map<&str, CPrimitive> = phf_map!(
+        "__SIZE_TYPE__" => CPrimitive::UnsignedInt,
+
         "__INT8_TYPE__" => CPrimitive::SignedChar,
         "__INT16_TYPE__" => CPrimitive::Short,
         "__INT32_TYPE__" => CPrimitive::Int,
