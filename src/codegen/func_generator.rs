@@ -20,7 +20,7 @@ use crate::{
         Generator, Reg, WORD_SIZE,
     },
     parser::program::{
-        ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType, CTypeId, Member},
+        ctype::{self, CConcreteType, CFunc, CFuncBody, CPrimitive, CType, CTypeId, Member},
         expr::{self, call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
         statement::{Block, Statement, Variable},
         ExecutionScope, Symbol,
@@ -758,7 +758,23 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
         if arg_target_spots.len() != call_args.len() {
             bail!(
-                "must pass the expected arg count in calling {call_target:?} with signature {sig_id:?}"
+                "{target} has signature {sig}, but was called with arguments ({args}): {call}. {} != {}",
+                arg_target_spots.len(),
+                call_args.len(),
+                target = self.format_expr(call_target),
+                sig = self.format_ctype(sig_id),
+                args = call_args
+                    .iter()
+                    .map(|arg| self.type_of_expr(arg))
+                    .collect::<anyhow::Result<Vec<CType>>>()?
+                    .into_iter()
+                    .map(|ctype| self.format_ctype(ctype))
+                    .join(", "),
+                call = self.generator.program.source_writer.format_call(
+                    &self.generator.program,
+                    call_target,
+                    call_args
+                ),
             );
         }
 
