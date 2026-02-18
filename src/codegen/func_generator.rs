@@ -1,4 +1,5 @@
 use std::{
+    array,
     cmp::Ordering,
     collections::{HashMap, HashSet, VecDeque},
     ops::{Add, Not, Shl, Shr},
@@ -901,15 +902,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                         );
                     };
 
-                    let (element_ctype, ele_pointer) =
+                    let (element_ctype, ele_address) =
                         self.calculate_element_address(target_expr, index_expr)?;
-
-                    self.evaluate_expression(
-                        right,
-                        Address::at(ele_pointer).with_ctype(element_ctype),
-                    )?;
-
-                    self.release_reg(ele_pointer);
+                    self.evaluate_expression(right, ele_address.with_ctype(element_ctype))?;
+                    self.release_reg(ele_address.base);
                 }
 
                 Expr::UnaryOp(UnaryOp::Dereference, target) => {
@@ -1067,14 +1063,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(());
                 };
 
-                let (element_ctype, ele_pointer) = self.calculate_element_address(left, right)?;
-
-                self.copy_lvalue(
-                    TypedLocation::new(element_ctype, Address::at(ele_pointer)),
-                    destination,
-                )?;
-
-                self.release_reg(ele_pointer);
+                let (element_ctype, ele_address) = self.calculate_element_address(left, right)?;
+                self.copy_lvalue(ele_address.with_ctype(element_ctype), destination)?;
+                self.release_reg(ele_address.base);
             }
             BinaryOp::BitwiseLeftShift => todo!(),
             BinaryOp::BitwiseRightShift => todo!(),
@@ -1306,7 +1297,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         &mut self,
         target: &Expr,
         index: &Expr,
-    ) -> Result<(CType, Reg), anyhow::Error> {
+    ) -> Result<(CType, LiteralIndexAddress), anyhow::Error> {
         let CType::PointerTo(element_ctypeid, _) = self.type_of_expr(target)? else {
             bail!("{} has a non-indexable type", self.format_expr(target));
         };
@@ -1341,7 +1332,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         self.b.add(ele_pointer, ele_pointer, ele_index);
         self.b.release_reg(ele_index);
 
-        Ok((element_ctype, ele_pointer))
+        Ok((element_ctype, LiteralIndexAddress::at(ele_pointer)))
     }
 
     fn calculate_member_address(
@@ -1431,7 +1422,31 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 }
             }
 
-            Expr::UnaryOp(unary_op, expr) => todo!(),
+            Expr::BinaryOp(BinaryOp::ArrayIndex, array, index) => {
+                Ok(self.calculate_element_address(array, index)?.1)
+            }
+
+            Expr::DotAccess { target, member } => {
+                Ok(self.calculate_member_address(target, member)?.1)
+            }
+
+            Expr::UnaryOp(UnaryOp::Dereference, expr) => {
+                let address = LiteralIndexAddress::at(self.reg());
+                self.release_reg(address.base);
+
+                self.evaluate_expression(
+                    expr,
+                    Location::Reg(address.base).with_ctype(self.type_of_expr(expr)?),
+                )?;
+
+                assert_eq!(self.reg(), address.base);
+                Ok(address)
+            }
+
+            Expr::UnaryOp(unary_op, expr) => todo!(
+                "Get address of applying {unary_op:?} to {}",
+                self.format_expr(expr)
+            ),
 
             expr => bail!(
                 "Cannot take the address of non-lvalue `{}`",

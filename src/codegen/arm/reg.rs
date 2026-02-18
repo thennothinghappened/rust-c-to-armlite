@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 /// A hardware register on ARM.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Reg {
     R0,
     R1,
