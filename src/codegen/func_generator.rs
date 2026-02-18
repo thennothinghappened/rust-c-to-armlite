@@ -21,7 +21,7 @@ use crate::{
     parser::program::{
         ctype::{CConcreteType, CFunc, CFuncBody, CPrimitive, CType, CTypeId, Member},
         expr::{self, call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
-        statement::{Block, Statement},
+        statement::{Block, Statement, Variable},
         ExecutionScope, Symbol,
     },
 };
@@ -60,10 +60,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
     /// Allocate space for a local variable, return its stack frame offset.
     fn allocate_var(&mut self, name: String, ctype: CType) -> StackLocal {
-        self.b.header(format!(
-            "{} {name};",
-            self.generator.program.format_ctype(ctype)
-        ));
+        self.b
+            .header(format!("{} {name};", self.format_ctype(ctype)));
 
         let var = self.allocate_anon(ctype);
         self.named_vars.insert(name, var);
@@ -104,7 +102,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
         self.b.inline_comment(format!(
             "ALLOC {typename} ({bytes} bytes) at {location} (Expecting SP = {sp:#010x})",
-            typename = self.generator.program.format_ctype(ctype),
+            typename = self.format_ctype(ctype),
             bytes = actual_size,
             location = self.b.format_address(&Address::from(local)),
             sp = 0x00100000 + self.stack_top_pos - 0x8
@@ -345,7 +343,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let if_false_label = self.b.create_label("If__else");
                 let done_label = self.b.create_label("If__done");
 
-                self.b.header(format!("## if ({condition})"));
+                let condition_debug_str = self.format_expr(condition);
+
+                self.b.header(format!("## if ({condition_debug_str})"));
 
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
                 self.evaluate_expression(condition, temp_condition_storage)?;
@@ -376,7 +376,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     self.generate_stmt(if_false)?;
                 }
 
-                self.b.footer(format!("## endif ({condition})"));
+                self.b.footer(format!("## endif ({condition_debug_str})"));
                 self.b.label(done_label);
             }
 
@@ -384,7 +384,9 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let loop_label = self.b.create_label("While__loop");
                 let done_label = self.b.create_label("While__done");
 
-                self.b.header(format!("while ({condition})"));
+                let condition_debug_str = self.format_expr(condition);
+
+                self.b.header(format!("while ({condition_debug_str})"));
                 let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
 
                 let breakable = Breakable {
@@ -412,7 +414,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 self.generate_continue_stmt()?;
 
-                self.b.footer(format!("endwhile ({condition})"));
+                self.b.footer(format!("endwhile ({condition_debug_str})"));
                 self.b.label(done_label);
                 self.free_local(temp_condition_storage);
 
@@ -459,8 +461,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         let destination = destination.into();
 
         println!(
-            "\nGenerating `{expr}`, used registers = {}",
-            self.b
+            "\nGenerating `{expr}`, used registers = {registers}",
+            expr = self.format_expr(expr),
+            registers = self
+                .b
                 .register_pool
                 .iter()
                 .filter_map(|(reg, status)| if status.available {
@@ -471,7 +475,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 .join(", ")
         );
 
-        self.b.header(format!("EVALUATE `{expr}`"));
+        self.b
+            .header(format!("EVALUATE `{expr}`", expr = self.format_expr(expr)));
 
         match expr {
             Expr::StringLiteral(value) => {
@@ -531,7 +536,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 _ => bail!(
                     "Can't assign {} to nullptr",
-                    self.generator.program.format_ctype(destination.ctype)
+                    self.format_ctype(destination.ctype)
                 ),
             },
 
@@ -539,8 +544,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 if let Some(source) = self.get_localvar(name) {
                     self.b.header(format!(
                         "=== query localvar `{name}` ({}) as a {} ===",
-                        self.generator.program.format_ctype(source.ctype),
-                        self.generator.program.format_ctype(destination.ctype)
+                        self.format_ctype(source.ctype),
+                        self.format_ctype(destination.ctype)
                     ));
 
                     self.copy_lvalue(source, destination)?;
@@ -717,8 +722,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
             _ => bail!(
                 "No implicit conversion from type `{}` to `{}`",
-                self.generator.program.format_ctype(source.ctype),
-                self.generator.program.format_ctype(destination.ctype)
+                self.format_ctype(source.ctype),
+                self.format_ctype(destination.ctype)
             ),
         };
 
@@ -759,9 +764,12 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         let stack_pointer_adjustment = initial_frame_top - self.stack_top_pos;
 
         self.b.header(format!(
-            "=== Call {1}({}) [{stack_pointer_adjustment} arg bytes] ===",
-            call_args.iter().join(", "),
-            call_target
+            "=== Call {} [{stack_pointer_adjustment} arg bytes] ===",
+            self.generator.program.source_writer.format_call(
+                &self.generator.program,
+                call_target,
+                call_args
+            )
         ));
 
         for (arg, out_info) in call_args.iter().zip(&arg_target_spots) {
@@ -798,8 +806,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         self.forget_stack_locals(arg_target_spots.len());
 
         if destination.is_nowhere() {
-            self.b
-                .footer(format!("=== END Call {0} => void ===", call_target));
+            self.b.footer(format!(
+                "=== END Call {0} => void ===",
+                self.format_expr(call_target)
+            ));
             return Ok(());
         };
 
@@ -810,7 +820,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             self.b.footer(format!(
                 "=== END Call {1} => R0 => {} ===",
                 self.b.format_location(&destination.location),
-                call_target
+                self.format_expr(call_target),
             ));
         } else {
             // no-op, we should've passed this info earlier.
@@ -885,7 +895,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 Expr::BinaryOp(BinaryOp::ArrayIndex, target_expr, index_expr) => {
                     let CType::PointerTo(element_ctype_id, _) = self.type_of_expr(target_expr)?
                     else {
-                        bail!("Cannot dereference `{target_expr}`, which is not a pointer");
+                        bail!(
+                            "Cannot dereference `{}`, which is not a pointer",
+                            self.format_expr(target_expr)
+                        );
                     };
 
                     let (element_ctype, ele_pointer) =
@@ -901,7 +914,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 Expr::UnaryOp(UnaryOp::Dereference, target) => {
                     let CType::PointerTo(element_ctype_id, _) = self.type_of_expr(target)? else {
-                        bail!("Cannot dereference `{target}`, which is not a pointer");
+                        bail!(
+                            "Cannot dereference `{}`, which is not a pointer",
+                            self.format_expr(target)
+                        );
                     };
 
                     let pointer_ctype = CType::pointer_to(element_ctype_id);
@@ -1007,9 +1023,15 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     return Ok(());
                 };
 
-                let opname = if op == BinaryOp::Plus { '+' } else { '-' };
+                let debug_binop_header = self.generator.program.source_writer.format_binary_op(
+                    &self.generator.program,
+                    &op,
+                    left,
+                    right,
+                );
+
                 self.b
-                    .header(format!("=== binop({left} {opname} {right}) ==="));
+                    .header(format!("=== binop({debug_binop_header}) ==="));
 
                 let left_temp = self.allocate_anon(destination.ctype);
                 let right_temp = self.allocate_anon(destination.ctype);
@@ -1036,7 +1058,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.release_reg(left_reg);
 
                 self.b
-                    .footer(format!("=== END binop({left} {opname} {right}) ==="));
+                    .footer(format!("=== END binop({debug_binop_header}) ==="));
             }
 
             BinaryOp::ArrayIndex => {
@@ -1144,7 +1166,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                     if destination.ctype != CPrimitive::Bool.into() {
                         todo!(
                             "Cast bool result to {}",
-                            self.generator.program.format_ctype(destination.ctype)
+                            self.format_ctype(destination.ctype)
                         )
                     }
 
@@ -1286,7 +1308,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         index: &Expr,
     ) -> Result<(CType, Reg), anyhow::Error> {
         let CType::PointerTo(element_ctypeid, _) = self.type_of_expr(target)? else {
-            bail!("{target} has a non-indexable type");
+            bail!("{} has a non-indexable type", self.format_expr(target));
         };
 
         let element_ctype = self.generator.program.get_ctype(element_ctypeid);
@@ -1361,14 +1383,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 bail!(
                     "Struct type `{}` has no member named {member}",
-                    self.generator.program.format_ctype(struct_ctype)
+                    self.format_ctype(struct_ctype)
                 )
             }
 
-            ctype => bail!(
-                "Cannot dot access type {}",
-                self.generator.program.format_ctype(ctype)
-            ),
+            ctype => bail!("Cannot dot access type {}", self.format_ctype(ctype)),
         }
     }
 
@@ -1413,12 +1432,31 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             }
 
             Expr::UnaryOp(unary_op, expr) => todo!(),
-            expr => bail!("Cannot take the address of non-lvalue `{expr}`"),
+
+            expr => bail!(
+                "Cannot take the address of non-lvalue `{}`",
+                self.format_expr(expr)
+            ),
         }
     }
 
     fn type_of_expr(&self, expr: &Expr) -> anyhow::Result<CType> {
         self.generator.program.type_of_expr(self, expr)
+    }
+
+    /// Format an AST statement as a human-readable representation of the C source.
+    pub fn format_statement(&self, statement: &Statement) -> String {
+        self.generator.program.format_statement(statement)
+    }
+
+    /// Format an AST expression as a human-readable representation of the C source.
+    pub fn format_expr(&self, expr: &Expr) -> String {
+        self.generator.program.format_expr(expr)
+    }
+
+    /// Format a type as it would appear in C source code.
+    pub fn format_ctype(&self, ctype: impl Into<CType>) -> String {
+        self.generator.program.format_ctype(ctype)
     }
 }
 

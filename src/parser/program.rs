@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context};
+use bimap::BiMap;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use thiserror::Error;
@@ -17,14 +18,16 @@ use crate::{
             CConcreteType, CEnum, CEnumId, CFunc, CFuncBody, CPrimitive, CSig, CSigId, CStruct,
             CStructId, CType, CTypeId, Member,
         },
-        expr::{BinaryOp, Expr, UnaryOp},
-        statement::{Block, Variable},
+        expr::{BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
+        source_writer::SourceWriter,
+        statement::{Block, Statement, Variable},
         target_architecture::TargetArchitecture,
     },
 };
 
 pub mod ctype;
 pub mod expr;
+pub mod source_writer;
 pub mod statement;
 pub(crate) mod target_architecture;
 
@@ -38,7 +41,7 @@ pub enum Symbol {
 pub struct Program {
     global_symbols: IndexMap<String, Symbol>,
 
-    structs_by_name: HashMap<String, CStructId>,
+    struct_names: BiMap<String, CStructId>,
     structs: HashMap<CStructId, CStruct>,
     next_struct_id: CStructId,
 
@@ -53,6 +56,7 @@ pub struct Program {
     ctypes: RefCell<HashMap<CTypeId, CType>>,
     next_ctype_id: Cell<CTypeId>,
 
+    pub source_writer: SourceWriter,
     pub arch: TargetArchitecture,
 }
 
@@ -102,12 +106,12 @@ impl Program {
         cstruct: CStruct,
     ) -> Result<CStructId, anyhow::Error> {
         let Some((existing_id, existing_struct)) = self
-            .structs_by_name
-            .get(&name)
+            .struct_names
+            .get_by_left(&name)
             .map(|&id| (id, self.get_struct(id)))
         else {
             let id = self.create_anonymous_struct(cstruct)?;
-            self.structs_by_name.insert(name, id);
+            self.struct_names.insert(name, id);
 
             return Ok(id);
         };
@@ -293,51 +297,19 @@ impl Program {
         self.global_symbols.get(name)
     }
 
+    /// Format an AST statement as a human-readable representation of the C source.
+    pub fn format_statement(&self, statement: &Statement) -> String {
+        self.source_writer.format_statement(self, statement)
+    }
+
+    /// Format an AST expression as a human-readable representation of the C source.
+    pub fn format_expr(&self, expr: &Expr) -> String {
+        self.source_writer.format_expr(self, expr)
+    }
+
+    /// Format a type as it would appear in C source code.
     pub fn format_ctype(&self, ctype: impl Into<CType>) -> String {
-        let ctype: CType = ctype.into();
-
-        match ctype {
-            CType::AsIs(cconcrete_type) => match cconcrete_type {
-                CConcreteType::Struct(cstruct_id) => {
-                    match self.structs_by_name.iter().find_map(|(name, id)| {
-                        if *id == cstruct_id {
-                            Some(name)
-                        } else {
-                            None
-                        }
-                    }) {
-                        Some(name) => format!("struct {name}"),
-                        None => "struct".to_string(),
-                    }
-                }
-
-                CConcreteType::Enum(cenum_id) => todo!("Enum ctypes"),
-
-                CConcreteType::Func(cfunc_type_id) => {
-                    let sig = self.get_signature(cfunc_type_id);
-
-                    format!(
-                        "{}(*)({})",
-                        self.format_ctype(sig.returns),
-                        sig.args
-                            .iter()
-                            .map(|arg| self.format_ctype(arg.ctype))
-                            .join(", ")
-                    )
-                }
-
-                CConcreteType::Primitive(cbuiltin_type) => format!("{cbuiltin_type}"),
-                CConcreteType::Void => "void".to_string(),
-            },
-
-            CType::PointerTo(ctype_id, None) => {
-                format!("{}*", self.format_ctype(self.get_ctype(ctype_id)))
-            }
-
-            CType::PointerTo(ctype_id, Some(length)) => {
-                format!("{}[{length}]", self.format_ctype(self.get_ctype(ctype_id)))
-            }
-        }
+        self.source_writer.format_ctype(self, ctype)
     }
 
     /// Determine the type of the given expression, assuming it is valid. References to named
@@ -576,7 +548,7 @@ impl Display for Program {
             self.get_global_variables().collect_vec()
         )?;
         writeln!(f, "enums: {:?}", self.enums_by_name)?;
-        writeln!(f, "structs: {:?}", self.structs_by_name)?;
+        writeln!(f, "structs: {:?}", self.struct_names)?;
         writeln!(f, "type id mapping: {:?}", self.ctypes)?;
         writeln!(f, "typedefs: {:?}", self.type_aliases)?;
         Ok(())
