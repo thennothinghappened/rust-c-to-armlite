@@ -2,7 +2,7 @@
 #include <stddef.h>
 #include <string.h>
 
-size_t strlen(char *buffer)
+size_t strlen(const char *buffer)
 {
 	size_t index = 0;
 
@@ -14,7 +14,7 @@ size_t strlen(char *buffer)
 	return index;
 }
 
-size_t strnlen_s(char* buffer, size_t bufferLength)
+size_t strnlen_s(const char* buffer, size_t bufferLength)
 {
 	size_t index = 0;
 
@@ -32,7 +32,7 @@ size_t strnlen_s(char* buffer, size_t bufferLength)
 }
 
 [[armlite_c::raw_assembly]]
-void memcpy(void *destination, void *source, size_t count)
+void memcpy(void *destination, const void *source, size_t count)
 {
 	// R0: Destination address
 	// R1: Source address
