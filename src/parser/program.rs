@@ -610,6 +610,15 @@ impl Program {
         }
     }
 
+    /// Evaluate at compile-time whether the given value is truthy, if possible.
+    pub(crate) fn evaluate_truthiness(&self, expr: &Expr) -> anyhow::Result<Option<bool>> {
+        Ok(match self.evaluate(expr)? {
+            Some(Expr::BoolLiteral(false) | Expr::IntLiteral(0) | Expr::NullPtr) => Some(false),
+            Some(_) => Some(true),
+            _ => None,
+        })
+    }
+
     fn bool_to_number(&self, value: bool) -> i32 {
         if value {
             1

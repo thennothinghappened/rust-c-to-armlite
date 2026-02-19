@@ -438,35 +438,36 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
                 self.b.header(format!("while ({condition_debug_str})"));
 
-                let temp_condition_storage = match self.generator.program.evaluate(condition)? {
-                    Some(Expr::BoolLiteral(false) | Expr::IntLiteral(0) | Expr::NullPtr) => {
-                        self.b.footer("<Body removed, loop never executes>");
-                        return Ok(());
-                    }
+                let temp_condition_storage =
+                    match self.generator.program.evaluate_truthiness(condition)? {
+                        Some(true) => {
+                            self.b.comment("Condition is always true.");
 
-                    None => self.allocate_anon(CPrimitive::Bool),
+                            self.breakable_stack.push_back(Breakable {
+                                loop_label,
+                                done_label,
+                                stack_top_pos: self.stack_top_pos,
+                            });
 
-                    _ => {
-                        self.b.comment("Condition is always true.");
+                            self.b.label(loop_label);
+                            self.generate_stmt(block)?;
+                            self.generate_continue_stmt()?;
 
-                        self.breakable_stack.push_back(Breakable {
-                            loop_label,
-                            done_label,
-                            stack_top_pos: self.stack_top_pos,
-                        });
+                            self.b.footer(format!("endwhile ({condition_debug_str})"));
+                            self.b.label(done_label);
 
-                        self.b.label(loop_label);
-                        self.generate_stmt(block)?;
-                        self.generate_continue_stmt()?;
+                            self.breakable_stack.pop_back();
 
-                        self.b.footer(format!("endwhile ({condition_debug_str})"));
-                        self.b.label(done_label);
+                            return Ok(());
+                        }
 
-                        self.breakable_stack.pop_back();
+                        Some(false) => {
+                            self.b.footer("<Body removed, loop never executes>");
+                            return Ok(());
+                        }
 
-                        return Ok(());
-                    }
-                };
+                        None => self.allocate_anon(CPrimitive::Bool),
+                    };
 
                 self.breakable_stack.push_back(Breakable {
                     loop_label,
