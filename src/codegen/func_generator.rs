@@ -487,6 +487,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     ) -> anyhow::Result<()> {
         let destination = destination.into();
 
+        #[cfg(debug_assertions)]
         println!(
             "\nGenerating `{expr}`, used registers = {registers}",
             expr = self.format_expr(expr),
