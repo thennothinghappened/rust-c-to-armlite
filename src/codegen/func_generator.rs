@@ -83,15 +83,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
         let mut offset = 0;
 
         for (spot_size, in_use) in self.frame.iter_mut() {
-            offset += *spot_size;
+            offset -= *spot_size as i32;
 
             if *spot_size == actual_size && !*in_use {
                 *in_use = true;
-
-                return StackLocal {
-                    offset: offset as i32,
-                    ctype,
-                };
+                return StackLocal { offset, ctype };
             }
         }
 
