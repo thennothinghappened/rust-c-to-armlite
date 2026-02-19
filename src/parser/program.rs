@@ -53,7 +53,7 @@ pub struct Program {
     next_func_type_id: CSigId,
 
     type_aliases: HashMap<String, CTypeId>,
-    ctypes: RefCell<HashMap<CTypeId, CType>>,
+    ctypes: RefCell<IndexMap<CTypeId, CType>>,
     next_ctype_id: Cell<CTypeId>,
 
     pub source_writer: SourceWriter,
@@ -540,16 +540,58 @@ pub(crate) trait ExecutionScope {
 
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "functions: {:?}", self.get_functions().collect_vec())?;
-        writeln!(
-            f,
-            "global vars: {:?}",
-            self.get_global_variables().collect_vec()
-        )?;
-        writeln!(f, "enums: {:?}", self.enums_by_name)?;
-        writeln!(f, "structs: {:?}", self.struct_names)?;
-        writeln!(f, "type id mapping: {:?}", self.ctypes)?;
-        writeln!(f, "typedefs: {:?}", self.type_aliases)?;
+        writeln!(f, "=== Type Ids ===")?;
+
+        for (&id, &ctype) in &*self.ctypes.borrow() {
+            writeln!(f, "{id:?} => {}", self.format_ctype(ctype))?;
+        }
+
+        writeln!(f)?;
+        writeln!(f, "=== Typedefs ===")?;
+
+        for (name, &id) in &self.type_aliases {
+            writeln!(
+                f,
+                "typedef {} {name};",
+                self.format_ctype(self.get_ctype(id))
+            )?;
+        }
+
+        writeln!(f)?;
+        writeln!(f, "=== Global Variables ===")?;
+
+        for (name, (ctype, expr)) in self.get_global_variables() {
+            write!(f, "{typename} {name}", typename = self.format_ctype(*ctype))?;
+
+            if let Some(expr) = expr {
+                write!(f, " = {}", self.format_expr(expr))?;
+            }
+
+            writeln!(f, ";")?;
+        }
+
+        writeln!(f)?;
+        writeln!(f, "=== Functions ===")?;
+
+        for (name, cfunc) in self.get_functions() {
+            writeln!(
+                f,
+                "{name}: {} {}",
+                self.format_ctype(cfunc.sig_id),
+                match &cfunc.body {
+                    CFuncBody::Defined(block) =>
+                        self.format_statement(&Statement::Block(block.clone())),
+
+                    CFuncBody::Extern => "(extern)".to_owned(),
+                    CFuncBody::None => "(not defined)".to_owned(),
+                },
+            )?;
+
+            writeln!(f)?;
+        }
+
+        writeln!(f)?;
+
         Ok(())
     }
 }
