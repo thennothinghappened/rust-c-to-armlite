@@ -41,7 +41,17 @@ size_t PrintFormatted(char *format, int *argsArray) {
 			// 	Panic("Not yet implemented");
 			// }
 
-			charIndex += 1;
+			charIndex ++;
+		} else if (c == 's') {
+			// Next argument is a pointer to a null-terminated string.
+			WriteString((char*) &argsArray[argIndex]);
+
+			charIndex ++;
+		} else if (c == 'c') {
+			// Next argument is a single character.
+			WriteChar((char) argsArray[argIndex]);
+
+			charIndex ++;
 		} else {
 			Panic("Unknown format specifier encountered");
 		}
