@@ -46,6 +46,11 @@ pub(super) struct FuncGenerator<'a, 'b> {
     named_vars: HashMap<String, StackLocal>,
     frame: Vec<(u32, bool)>,
     breakable_stack: VecDeque<Breakable>,
+
+    /// The topmost entry refers to the current scope, and contains the list of variables declared
+    /// in it. When that scope ends, those variables are free'd.
+    scope_stack: VecDeque<VecDeque<StackLocal>>,
+
     done_label: LabelId,
 }
 
@@ -61,6 +66,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             frame: Vec::default(),
             breakable_stack: VecDeque::default(),
             done_label,
+            scope_stack: VecDeque::from([VecDeque::new()]),
         }
     }
 
@@ -90,7 +96,11 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
             if *spot_size == actual_size && !*in_use {
                 *in_use = true;
-                return StackLocal { offset, ctype };
+
+                let local = StackLocal { offset, ctype };
+                self.scope_stack.back_mut().unwrap().push_back(local);
+
+                return local;
             }
         }
 
@@ -112,6 +122,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
         self.b.sub(Reg::Sp, Reg::Sp, actual_size as i32);
 
+        self.scope_stack.back_mut().unwrap().push_back(local);
         local
     }
 
@@ -124,7 +135,7 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
             println!("Freeing top of stack ({var:?})");
 
             let Some(top_slot) = self.frame.last_mut() else {
-                panic!("Can't call `forget` with an empty stack!");
+                panic!("Can't call `free_local` with an empty stack!");
             };
             top_slot.1 = false;
 
@@ -141,9 +152,17 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.frame, self.stack_top_pos
             );
 
-            self.b
-                .add(Reg::Sp, Reg::Sp, self.stack_top_pos - old_stack_top_pos);
+            let actual_size = self.stack_top_pos - old_stack_top_pos;
 
+            self.b.inline_comment(format!(
+                "FREEING {typename} ({bytes} bytes) at {location} (Expecting SP = {sp:#010x})",
+                typename = self.format_ctype(var.ctype),
+                bytes = actual_size,
+                location = self.b.format_address(&Address::from(var)),
+                sp = 0x00100000 + self.stack_top_pos - 0x8
+            ));
+
+            self.b.add(Reg::Sp, Reg::Sp, actual_size);
             return;
         }
 
@@ -259,8 +278,14 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     }
 
     fn generate_block(&mut self, block: &Block) -> anyhow::Result<()> {
+        self.scope_stack.push_back(VecDeque::new());
+
         for stmt in &block.statements {
             self.generate_stmt(stmt)?;
+        }
+
+        for var in self.scope_stack.pop_back().unwrap() {
+            self.free_local(var);
         }
 
         Ok(())
