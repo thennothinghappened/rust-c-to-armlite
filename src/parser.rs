@@ -525,12 +525,45 @@ impl<'a> Parser<'a> {
             .filter(|op| op.binding_strength() >= min_power)
         }) {
             let binding_strength = op.binding_strength();
+            let rhs = self.parse_expr(binding_strength)?;
 
-            lhs = Expr::BinaryOp(
-                op,
-                Box::new(lhs),
-                Box::new(self.parse_expr(binding_strength)?),
-            );
+            lhs = match (&lhs, &rhs) {
+                (Expr::IntLiteral(left), Expr::IntLiteral(right)) => match &op {
+                    BinaryOp::Plus => (left + right).into(),
+                    BinaryOp::Minus => (left - right).into(),
+                    BinaryOp::LogicAnd => ((*left != 0) && (*right != 0)).into(),
+                    BinaryOp::LogicOr => ((*left != 0) || (*right != 0)).into(),
+
+                    BinaryOp::LogicOrdering(mode) => match mode {
+                        OrderMode::LessThan => left < right,
+                        OrderMode::LessOrEqual => left <= right,
+                        OrderMode::GreaterThan => left > right,
+                        OrderMode::GreaterOrEqual => left >= right,
+                    }
+                    .into(),
+
+                    BinaryOp::LogicEqual(mode) => match mode {
+                        CompareMode::Equal => left == right,
+                        CompareMode::NotEqual => left != right,
+                    }
+                    .into(),
+
+                    BinaryOp::Bitwise(op) => match op {
+                        BinaryBitwiseOp::And => left & right,
+                        BinaryBitwiseOp::Or => left | right,
+                        BinaryBitwiseOp::Xor => left ^ right,
+                        BinaryBitwiseOp::Shift(BitwiseShiftDirection::Left) => left << right,
+                        BinaryBitwiseOp::Shift(BitwiseShiftDirection::Right) => left >> right,
+                    }
+                    .into(),
+
+                    BinaryOp::AndThen => (*right).into(),
+
+                    _ => Expr::BinaryOp(op, Box::new(lhs), Box::new(rhs)),
+                },
+
+                _ => Expr::BinaryOp(op, Box::new(lhs), Box::new(rhs)),
+            };
         }
 
         Ok(lhs)

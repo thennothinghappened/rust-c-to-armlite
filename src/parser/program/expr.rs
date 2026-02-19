@@ -90,6 +90,18 @@ impl Display for BinaryOp {
     }
 }
 
+impl From<bool> for Expr {
+    fn from(value: bool) -> Self {
+        Expr::BoolLiteral(value)
+    }
+}
+
+impl From<i32> for Expr {
+    fn from(value: i32) -> Self {
+        Expr::IntLiteral(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompareMode {
     Equal,
