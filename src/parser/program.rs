@@ -575,7 +575,29 @@ impl Program {
                 _ => return Ok(None),
             })),
 
+            (&Expr::BoolLiteral(left), &Expr::BoolLiteral(right)) => self.evaluate_binary_op(
+                op,
+                &self.bool_to_number(left).into(),
+                &self.bool_to_number(right).into(),
+            ),
+
+            (&Expr::BoolLiteral(left), &Expr::IntLiteral(right)) => {
+                self.evaluate_binary_op(op, &self.bool_to_number(left).into(), &right.into())
+            }
+
+            (&Expr::IntLiteral(left), &Expr::BoolLiteral(right)) => {
+                self.evaluate_binary_op(op, &left.into(), &self.bool_to_number(right).into())
+            }
+
             _ => Ok(None),
+        }
+    }
+
+    fn bool_to_number(&self, value: bool) -> i32 {
+        if value {
+            1
+        } else {
+            0
         }
     }
 }
