@@ -5,6 +5,12 @@
 #include <armlite/display.h>
 #include <string.h>
 
+#ifdef __armlite__
+#define GRAPHICS_SUPPORTED true
+#endif
+
+#ifdef GRAPHICS_SUPPORTED
+
 bool g_graphicsReady;
 
 void GraphicsTest() {
@@ -20,6 +26,8 @@ void GraphicsTest() {
 		}
 	}
 }
+
+#endif
 
 int MultiplyBy10(int value) {
 	// yes this is cursed but there's no multiplying yet lol.
@@ -114,21 +122,28 @@ void Calculator() {
 
 int main() {
 	char userInput[128];
+
+#ifdef GRAPHICS_SUPPORTED
 	g_graphicsReady = false;
+#endif
 
 	while (true) {
 		WriteString("Pick an option!\n"
+#ifdef GRAPHICS_SUPPORTED
 			"- GraphicsTest\n"
+#endif
 			"- Calculator\n"
 			"- Exit\n\n"
 		);
 
 		ReadString(userInput);
 
+#ifdef GRAPHICS_SUPPORTED
 		if (strcmp(userInput, "GraphicsTest") == 0) {
 			GraphicsTest();
 			continue;
 		}
+#endif
 
 		if (strcmp(userInput, "Calculator") == 0) {
 			Calculator();
