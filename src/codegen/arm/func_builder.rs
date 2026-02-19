@@ -229,7 +229,7 @@ impl<'a> FuncBuilder<'a> {
             (Location::Reg(source_reg), Location::Reg(destination_reg)) if byte_count == 3 => {
                 self.bitwise_and(destination_reg, destination_reg, 0xff000000_u32);
                 self.bitwise_and(source_reg, source_reg, 0x00ffffff);
-                self.or(destination_reg, destination_reg, source_reg);
+                self.bitwise_or(destination_reg, destination_reg, source_reg);
             }
 
             (Location::Reg(source_reg), Location::Reg(destination_reg)) => {
@@ -522,7 +522,7 @@ impl<'a> FuncBuilder<'a> {
         self.append(Inst::Sub(dest, left, right.into()))
     }
 
-    pub fn or(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
+    pub fn bitwise_or(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::BitOr(dest, left, right.into()))
     }
 
@@ -530,7 +530,7 @@ impl<'a> FuncBuilder<'a> {
         self.append(Inst::BitAnd(dest, left, right.into()))
     }
 
-    pub fn xor(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
+    pub fn bitwise_xor(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
         self.append(Inst::BitXor(dest, left, right.into()))
     }
 

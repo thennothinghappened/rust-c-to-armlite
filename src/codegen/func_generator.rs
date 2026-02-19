@@ -23,7 +23,10 @@ use crate::{
         ctype::{
             self, CConcreteType, CFunc, CFuncBody, CPrimitive, CStructKind, CType, CTypeId, Member,
         },
-        expr::{self, call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
+        expr::{
+            self, call::Call, BinaryBitwiseOp, BinaryOp, BitwiseShiftDirection, CompareMode, Expr,
+            OrderMode, UnaryOp,
+        },
         statement::{Block, Statement, Variable},
         ExecutionScope, Symbol,
     },
@@ -1083,8 +1086,57 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.copy_lvalue(ele_address.with_ctype(element_ctype), destination)?;
                 self.release_reg(ele_address.base);
             }
-            BinaryOp::BitwiseLeftShift => todo!(),
-            BinaryOp::BitwiseRightShift => todo!(),
+            BinaryOp::Bitwise(bitwise_op) => {
+                let left_ctype = self.type_of_expr(left)?;
+                let right_ctype = self.type_of_expr(right)?;
+
+                let common_ctype = self
+                    .generator
+                    .program
+                    .common_ctype(&left_ctype, &right_ctype)?;
+
+                let left_temp = self.allocate_anon(common_ctype);
+                let right_temp = self.allocate_anon(common_ctype);
+
+                self.evaluate_expression(left, left_temp)?;
+                self.evaluate_expression(right, right_temp)?;
+
+                let [left_reg, right_reg] = self.regs();
+
+                self.copy_lvalue(left_temp, Location::Reg(left_reg).with_ctype(common_ctype))?;
+                self.copy_lvalue(
+                    right_temp,
+                    Location::Reg(right_reg).with_ctype(common_ctype),
+                )?;
+
+                self.free_local(left_temp);
+                self.free_local(right_temp);
+
+                match bitwise_op {
+                    BinaryBitwiseOp::And => self.b.bitwise_and(left_reg, left_reg, right_reg),
+
+                    BinaryBitwiseOp::Or => self.b.bitwise_or(left_reg, left_reg, right_reg),
+
+                    BinaryBitwiseOp::Xor => self.b.bitwise_xor(left_reg, left_reg, right_reg),
+
+                    BinaryBitwiseOp::Shift(BitwiseShiftDirection::Left) => {
+                        self.b.shift_left(left_reg, left_reg, right_reg)
+                    }
+
+                    BinaryBitwiseOp::Shift(BitwiseShiftDirection::Right) => {
+                        self.b.shift_right(left_reg, left_reg, right_reg)
+                    }
+                };
+
+                self.release_reg(right_reg);
+
+                self.copy_lvalue(
+                    Location::Reg(left_reg).with_ctype(common_ctype),
+                    destination,
+                )?;
+
+                self.release_reg(left_reg);
+            }
 
             BinaryOp::LogicOrdering(mode) => {
                 let left_ctype = self.type_of_expr(left)?;
@@ -1131,9 +1183,10 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 self.b.label(done);
             }
 
-            BinaryOp::BitwiseXor => todo!(),
-            BinaryOp::BitwiseAnd => todo!(),
-            BinaryOp::BitwiseOr => todo!(),
+            BinaryOp::Bitwise(BinaryBitwiseOp::Xor) => todo!(),
+            BinaryOp::Bitwise(BinaryBitwiseOp::And) => todo!(),
+            BinaryOp::Bitwise(BinaryBitwiseOp::Or) => todo!(),
+
             BinaryOp::LogicAnd | BinaryOp::LogicOr => {
                 let is_and = matches!(op, BinaryOp::LogicAnd);
 

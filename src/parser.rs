@@ -11,7 +11,10 @@ use crate::{
                 CConcreteType, CFunc, CFuncBody, CPrimitive, CSig, CSigId, CStruct, CStructKind,
                 CType, Member,
             },
-            expr::{call::Call, BinaryOp, BindingPower, CompareMode, Expr, OrderMode, UnaryOp},
+            expr::{
+                call::Call, BinaryBitwiseOp, BinaryOp, BindingPower, BitwiseShiftDirection,
+                CompareMode, Expr, OrderMode, UnaryOp,
+            },
             statement::{Block, Statement, Variable},
             Program, StructBuilder, Symbol,
         },
@@ -496,9 +499,21 @@ impl<'a> Parser<'a> {
                 TokenKind::BooleanAnd => Some(BinaryOp::LogicAnd),
                 TokenKind::BooleanOr => Some(BinaryOp::LogicOr),
                 TokenKind::LessThan => Some(BinaryOp::LogicOrdering(OrderMode::LessThan)),
+                TokenKind::LessOrEqual => Some(BinaryOp::LogicOrdering(OrderMode::LessOrEqual)),
                 TokenKind::GreaterThan => Some(BinaryOp::LogicOrdering(OrderMode::GreaterThan)),
+                TokenKind::GreaterOrEqual => {
+                    Some(BinaryOp::LogicOrdering(OrderMode::GreaterOrEqual))
+                }
                 TokenKind::Plus => Some(BinaryOp::Plus),
                 TokenKind::Minus => Some(BinaryOp::Minus),
+
+                TokenKind::BitwiseShiftLeft => Some(BinaryOp::Bitwise(BinaryBitwiseOp::Shift(
+                    BitwiseShiftDirection::Left,
+                ))),
+
+                TokenKind::BitwiseShiftRight => Some(BinaryOp::Bitwise(BinaryBitwiseOp::Shift(
+                    BitwiseShiftDirection::Right,
+                ))),
                 _ => None,
             }
             .filter(|op| op.binding_strength() >= min_power)

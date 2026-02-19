@@ -84,8 +84,8 @@ const SINGLE_CHARACTER_TOKEN_MAP: phf::Map<char, TokenKind> = phf_map!(
     ';' => TokenKind::Semicolon,
     '*' => TokenKind::Star,
     ',' => TokenKind::Comma,
-    '<' => TokenKind::LessThan,
-    '>' => TokenKind::GreaterThan,
+    '~' => TokenKind::BitwiseNegate,
+    '^' => TokenKind::BitwiseXor,
     '?' => TokenKind::QuestionMark,
     '.' => TokenKind::DotAccessor,
 );
@@ -142,6 +142,26 @@ impl<'a> Lexer<'a> {
             self.maybe_map_next_char(|char| SINGLE_CHARACTER_TOKEN_MAP.get(&char))
         {
             return basic_token;
+        }
+
+        if self.accept_char('<') {
+            return self
+                .maybe_map_next_char(|c| match c {
+                    '<' => Some(TokenKind::BitwiseShiftLeft),
+                    '=' => Some(TokenKind::LessOrEqual),
+                    _ => None,
+                })
+                .unwrap_or(TokenKind::LessThan);
+        }
+
+        if self.accept_char('>') {
+            return self
+                .maybe_map_next_char(|c| match c {
+                    '>' => Some(TokenKind::BitwiseShiftRight),
+                    '=' => Some(TokenKind::GreaterOrEqual),
+                    _ => None,
+                })
+                .unwrap_or(TokenKind::GreaterThan);
         }
 
         if self.accept_char('!') {

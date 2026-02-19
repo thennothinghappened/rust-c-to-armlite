@@ -10,4 +10,5 @@
 
 #include "armlite.c"
 #include "armlite-io.c"
+#include "display.c"
 #include "main.c"

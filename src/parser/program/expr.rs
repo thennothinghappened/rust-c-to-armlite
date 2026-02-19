@@ -28,13 +28,9 @@ pub enum BinaryOp {
 
     Plus,
     Minus,
-    BitwiseLeftShift,
-    BitwiseRightShift,
     LogicOrdering(OrderMode),
     LogicEqual(CompareMode),
-    BitwiseXor,
-    BitwiseAnd,
-    BitwiseOr,
+    Bitwise(BinaryBitwiseOp),
     LogicAnd,
     LogicOr,
 
@@ -48,6 +44,20 @@ pub enum BinaryOp {
     AndThen,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryBitwiseOp {
+    And,
+    Or,
+    Xor,
+    Shift(BitwiseShiftDirection),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitwiseShiftDirection {
+    Left,
+    Right,
+}
+
 impl Display for BinaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -57,18 +67,19 @@ impl Display for BinaryOp {
                 BinaryOp::ArrayIndex => "[]",
                 BinaryOp::Plus => "+",
                 BinaryOp::Minus => "-",
-                BinaryOp::BitwiseLeftShift => "<<",
-                BinaryOp::BitwiseRightShift => ">>",
                 BinaryOp::LogicOrdering(order_mode) => match order_mode {
                     OrderMode::LessThan => "<",
                     OrderMode::LessOrEqual => "<=",
                     OrderMode::GreaterThan => ">",
                     OrderMode::GreaterOrEqual => ">=",
                 },
-                BinaryOp::LogicEqual(compare_mode) => "==",
-                BinaryOp::BitwiseXor => "^",
-                BinaryOp::BitwiseAnd => "&",
-                BinaryOp::BitwiseOr => "|",
+                BinaryOp::LogicEqual(CompareMode::Equal) => "==",
+                BinaryOp::LogicEqual(CompareMode::NotEqual) => "!=",
+                BinaryOp::Bitwise(BinaryBitwiseOp::Xor) => "^",
+                BinaryOp::Bitwise(BinaryBitwiseOp::And) => "&",
+                BinaryOp::Bitwise(BinaryBitwiseOp::Or) => "|",
+                BinaryOp::Bitwise(BinaryBitwiseOp::Shift(BitwiseShiftDirection::Left)) => "<<",
+                BinaryOp::Bitwise(BinaryBitwiseOp::Shift(BitwiseShiftDirection::Right)) => ">>",
                 BinaryOp::LogicAnd => "&&",
                 BinaryOp::LogicOr => "||",
                 BinaryOp::Assign => "=",
@@ -103,13 +114,12 @@ impl BindingPower for BinaryOp {
             Self::ArrayIndex => 1,
             Self::Minus => 4,
             Self::Plus => 4,
-            Self::BitwiseRightShift => 5,
-            Self::BitwiseLeftShift => 5,
+            Self::Bitwise(BinaryBitwiseOp::Shift(_)) => 5,
             Self::LogicOrdering(_) => 6,
             Self::LogicEqual(_) => 7,
-            Self::BitwiseAnd => 8,
-            Self::BitwiseXor => 9,
-            Self::BitwiseOr => 10,
+            Self::Bitwise(BinaryBitwiseOp::And) => 8,
+            Self::Bitwise(BinaryBitwiseOp::Xor) => 9,
+            Self::Bitwise(BinaryBitwiseOp::Or) => 10,
             Self::LogicAnd => 11,
             Self::LogicOr => 12,
             Self::Assign => 14,

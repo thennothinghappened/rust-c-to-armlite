@@ -2,7 +2,10 @@ use itertools::Itertools;
 
 use crate::parser::program::{
     ctype::{CConcreteType, CType},
-    expr::{call::Call, BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
+    expr::{
+        call::Call, BinaryBitwiseOp, BinaryOp, BitwiseShiftDirection, CompareMode, Expr, OrderMode,
+        UnaryOp,
+    },
     statement::{Statement, Variable},
     Program,
 };
@@ -171,11 +174,18 @@ impl SourceWriter {
             BinaryOp::Plus => format!("{lhs} + {rhs}"),
             BinaryOp::Minus => format!("{lhs} - {rhs}"),
             BinaryOp::ArrayIndex => format!("{lhs}[{rhs}]"),
-            BinaryOp::BitwiseLeftShift => format!("{lhs} << {rhs}"),
-            BinaryOp::BitwiseRightShift => format!("{lhs} >> {rhs}"),
-            BinaryOp::BitwiseXor => format!("{lhs} ^ {rhs}"),
-            BinaryOp::BitwiseAnd => format!("{lhs} & {rhs}"),
-            BinaryOp::BitwiseOr => format!("{lhs} | {rhs}"),
+
+            BinaryOp::Bitwise(BinaryBitwiseOp::Shift(BitwiseShiftDirection::Left)) => {
+                format!("{lhs} << {rhs}")
+            }
+
+            BinaryOp::Bitwise(BinaryBitwiseOp::Shift(BitwiseShiftDirection::Right)) => {
+                format!("{lhs} >> {rhs}")
+            }
+
+            BinaryOp::Bitwise(BinaryBitwiseOp::Xor) => format!("{lhs} ^ {rhs}"),
+            BinaryOp::Bitwise(BinaryBitwiseOp::And) => format!("{lhs} & {rhs}"),
+            BinaryOp::Bitwise(BinaryBitwiseOp::Or) => format!("{lhs} | {rhs}"),
             BinaryOp::LogicAnd => format!("{lhs} && {rhs}"),
             BinaryOp::LogicOr => format!("{lhs} || {rhs}"),
         }

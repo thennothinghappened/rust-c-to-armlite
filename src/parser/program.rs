@@ -369,11 +369,10 @@ impl Program {
                     CType::PointerTo(inner, _) => Ok(self.get_ctype(inner)),
                 },
 
-                BinaryOp::BitwiseLeftShift => todo!(),
-                BinaryOp::BitwiseRightShift => todo!(),
-                BinaryOp::BitwiseXor => todo!(),
-                BinaryOp::BitwiseAnd => todo!(),
-                BinaryOp::BitwiseOr => todo!(),
+                BinaryOp::Bitwise(_) => self.common_ctype(
+                    &self.type_of_expr(scope, left)?,
+                    &self.type_of_expr(scope, right)?,
+                ),
             },
 
             Expr::UnaryOp(op, expr) => match op {
