@@ -40,9 +40,8 @@ fn main() {
 
     for option in options {
         match &option[2..] {
-            "armv7" => {
-                target = TargetArchitecture::ArmV7;
-            }
+            "armv7" => target = TargetArchitecture::ArmV7,
+            "armlite" => target = TargetArchitecture::ArmLite,
             _ => panic!("Unknown option {option}"),
         }
     }
