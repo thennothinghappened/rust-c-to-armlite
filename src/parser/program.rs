@@ -338,7 +338,7 @@ impl Program {
             }
 
             Expr::Call(call) => match self.type_of_expr(scope, &call.target)? {
-                CType::AsIs(CConcreteType::Func(sig_id)) => Ok(sig_id.into()),
+                CType::AsIs(CConcreteType::Func(sig_id)) => Ok(self.get_signature(sig_id).returns),
                 CType::AsIs(inner) => {
                     bail!("{} is not a valid call target", self.format_ctype(inner))
                 }
