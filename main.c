@@ -1,4 +1,5 @@
 
+#include <stdlib.h>
 #include <armlite/armlite.h>
 #include <armlite/armlite-io.h>
 #include <armlite/display.h>
@@ -20,9 +21,95 @@ void GraphicsTest() {
 	}
 }
 
+int MultiplyBy10(int value) {
+	// yes this is cursed but there's no multiplying yet lol.
+	return (value << 3) + (value << 1);
+}
+
+/// Convert an ASCII letter to a number, or return a negative value.
+int ToNumber(char asciiChar) {
+	int number = (asciiChar - '0');
+
+	if (number > 9) {
+		return 0-1;
+	}
+
+	return number;
+}
+
+void SkipSpaces(char **next) {
+	while (**next == ' ') {
+		*next += 1;
+	}
+}
+
 void Calculator() {
-	// char userInput[128];
-	Panic("Not yet implemented!");
+	char userInput[128];
+
+	WriteString("Enter a basic equation:\n");
+	ReadString(userInput);
+
+	char *next = userInput;
+
+	int leftNumber = 0;
+	int rightNumber = 0;
+	char operator = '\0';
+
+	// Get the first operand.
+	while (*next != '\0') {
+		SkipSpaces(&next);
+
+		int number = ToNumber(*next);
+
+		if (number < 0) {
+			operator = *next;
+			next ++;
+			break;
+		}
+
+		leftNumber = MultiplyBy10(leftNumber) + number;
+		next ++;
+	}
+
+	// Get the second operand.
+	while (*next != '\0') {
+		SkipSpaces(&next);
+
+		int number = ToNumber(*next);
+
+		if (number < 0) {
+			int args[1];
+			args[0] = (int) *next;
+
+			PrintFormatted("`%c` isn't a number!\n", args);
+			abort();
+		}
+
+		rightNumber = MultiplyBy10(rightNumber) + number;
+		next ++;
+	}
+
+	int result;
+
+	// Do the operation!
+	if (operator == '+') {
+		result = leftNumber + rightNumber;
+	} else if (operator == '-') {
+		result = leftNumber - rightNumber;
+	} else {
+		int args[1];
+		args[0] = (int) operator;
+		
+		PrintFormatted("Operator `%c` is not supported.\n", args);
+		abort();
+	}
+
+	int args[4];
+	args[0] = leftNumber;
+	args[1] = (int) operator;
+	args[2] = rightNumber;
+	args[3] = result;
+	PrintFormatted("Result: %d %c %d = %d\n", args);
 }
 
 int main() {
