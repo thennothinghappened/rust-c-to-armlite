@@ -358,10 +358,10 @@ impl Program {
                 | BinaryOp::LogicOr => Ok(CPrimitive::Bool.into()),
 
                 BinaryOp::Plus | BinaryOp::Minus => {
-                    let left_ctype = self.type_of_expr(scope, left);
-                    let right_ctype = self.type_of_expr(scope, right);
+                    let left_ctype = self.type_of_expr(scope, left)?;
+                    let right_ctype = self.type_of_expr(scope, right)?;
 
-                    todo!("numeric type implicit conversion rules")
+                    self.common_ctype(&left_ctype, &right_ctype)
                 }
 
                 BinaryOp::ArrayIndex => match self.type_of_expr(scope, left)? {
