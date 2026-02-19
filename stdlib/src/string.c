@@ -56,3 +56,20 @@ __asm__("Lloop__memcpy:");
 __asm__("Ldone__memcpy:");
 	__asm__("MOV PC, LR");
 }
+
+int strcmp(const char* lhs, const char* rhs) {
+	for (size_t i = 0; true; i ++) {
+		char left = lhs[i];
+		char right = rhs[i];
+
+		int diff = (left - right);
+
+		if (diff != 0) {
+			return diff;
+		}
+
+		if (left == '\0') {
+			return 0;
+		}
+	}
+}
