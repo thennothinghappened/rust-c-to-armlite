@@ -15,7 +15,7 @@ use crate::{
             address::{Address, LiteralIndexAddress},
             inst::{BranchTarget, CommentPosition, Inst},
             location::Location,
-            reg::{OneOrMoreRegisters, Reg},
+            reg::{self, OneOrMoreRegisters, Reg},
             reg_or_imm::RegOrImm,
             value::{Value, ValueWidth},
             AsmMode, Imm,
@@ -515,11 +515,23 @@ impl<'a> FuncBuilder<'a> {
     }
 
     pub fn add(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
-        self.append(Inst::Add(dest, left, right.into()))
+        let right = right.into();
+
+        if let RegOrImm::Imm(Imm::I32(0)) = right {
+            return;
+        }
+
+        self.append(Inst::Add(dest, left, right))
     }
 
     pub fn sub(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
-        self.append(Inst::Sub(dest, left, right.into()))
+        let right = right.into();
+
+        if let RegOrImm::Imm(Imm::I32(0)) = right {
+            return;
+        }
+
+        self.append(Inst::Sub(dest, left, right))
     }
 
     pub fn bitwise_or(&mut self, dest: Reg, left: Reg, right: impl Into<RegOrImm>) {
