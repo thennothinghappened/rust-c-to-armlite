@@ -19,10 +19,12 @@ void GraphicsTest() {
 		g_graphicsReady = true;
 	}
 	
-	for (size_t y = 0; y < DISPLAY_GRID_ROWS; y ++) {
-		for (size_t x = 0; x < DISPLAY_GRID_COLUMNS; x ++) {
-			size_t index = x + (y << 5);
-			g_displayGrid[index] = (x << 12) + (index);
+	for (size_t iterations = 0; iterations < 50; iterations ++) {
+		for (size_t y = 0; y < DISPLAY_GRID_ROWS; y ++) {
+			for (size_t x = 0; x < DISPLAY_GRID_COLUMNS; x ++) {
+				size_t index = x + (y << 5);
+				g_displayGrid[index] = ((x + iterations) << 12) + (index);
+			}
 		}
 	}
 }
