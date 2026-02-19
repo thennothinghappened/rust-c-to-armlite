@@ -437,15 +437,42 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 let condition_debug_str = self.format_expr(condition);
 
                 self.b.header(format!("while ({condition_debug_str})"));
-                let temp_condition_storage = self.allocate_anon(CPrimitive::Bool);
 
-                let breakable = Breakable {
+                let temp_condition_storage = match self.generator.program.evaluate(condition)? {
+                    Some(Expr::BoolLiteral(false) | Expr::IntLiteral(0) | Expr::NullPtr) => {
+                        self.b.footer("<Body removed, loop never executes>");
+                        return Ok(());
+                    }
+
+                    None => self.allocate_anon(CPrimitive::Bool),
+
+                    _ => {
+                        self.b.comment("Condition is always true.");
+
+                        self.breakable_stack.push_back(Breakable {
+                            loop_label,
+                            done_label,
+                            stack_top_pos: self.stack_top_pos,
+                        });
+
+                        self.b.label(loop_label);
+                        self.generate_stmt(block)?;
+                        self.generate_continue_stmt()?;
+
+                        self.b.footer(format!("endwhile ({condition_debug_str})"));
+                        self.b.label(done_label);
+
+                        self.breakable_stack.pop_back();
+
+                        return Ok(());
+                    }
+                };
+
+                self.breakable_stack.push_back(Breakable {
                     loop_label,
                     done_label,
                     stack_top_pos: self.stack_top_pos,
-                };
-
-                self.breakable_stack.push_back(breakable);
+                });
 
                 self.b.label(loop_label);
                 self.evaluate_expression(condition, temp_condition_storage)?;

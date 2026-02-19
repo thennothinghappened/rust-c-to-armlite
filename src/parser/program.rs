@@ -533,6 +533,23 @@ impl Program {
         }
     }
 
+    /// Evaluate the given expression at compile-time, if indeed it is possible to do so.
+    pub(crate) fn evaluate(&self, expr: &Expr) -> anyhow::Result<Option<Expr>> {
+        Ok(match expr {
+            Expr::StringLiteral(_) | Expr::IntLiteral(_) | Expr::BoolLiteral(_) | Expr::NullPtr => {
+                Some(expr.clone())
+            }
+
+            Expr::BinaryOp(op, left, right) => self.evaluate_binary_op(op, left, right)?,
+
+            Expr::Reference(_) => None,                 // todo
+            Expr::Call(call) => None,                   // todo
+            Expr::UnaryOp(unary_op, expr) => None,      // todo
+            Expr::Cast(expr, ctype) => None,            // todo
+            Expr::DotAccess { target, member } => None, // todo
+        })
+    }
+
     /// Evaluate the the given binary operation at compile-time, if indeed it is possible to do so.
     pub(crate) fn evaluate_binary_op(
         &self,
