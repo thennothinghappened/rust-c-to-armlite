@@ -95,7 +95,7 @@ impl<'a> Parser<'a> {
                     // One of our custom attributes!
                     Some("armlite_c") => match name.as_str() {
                         "raw_assembly" => is_raw_assembly = true,
-                        _ => return self.error(format!("Unknown attribute armlite_c::{name}")),
+                        _ => return Err(self.error(format!("Unknown attribute armlite_c::{name}"))),
                     },
 
                     // Standard attribute.
@@ -190,7 +190,7 @@ impl<'a> Parser<'a> {
             if self.next_is(TokenKind::OpenParen) {
                 // function pointer AHHHHHHHHHHHH
                 let CType::PointerTo(return_ctype_id, None) = this_type else {
-                    return self.error("Expecting a pointer when parsing a function type");
+                    return Err(self.error("Expecting a pointer when parsing a function type"));
                 };
 
                 let args = self.parse_func_decl_args()?;
@@ -527,43 +527,11 @@ impl<'a> Parser<'a> {
             let binding_strength = op.binding_strength();
             let rhs = self.parse_expr(binding_strength)?;
 
-            lhs = match (&lhs, &rhs) {
-                (Expr::IntLiteral(left), Expr::IntLiteral(right)) => match &op {
-                    BinaryOp::Plus => (left + right).into(),
-                    BinaryOp::Minus => (left - right).into(),
-                    BinaryOp::LogicAnd => ((*left != 0) && (*right != 0)).into(),
-                    BinaryOp::LogicOr => ((*left != 0) || (*right != 0)).into(),
-
-                    BinaryOp::LogicOrdering(mode) => match mode {
-                        OrderMode::LessThan => left < right,
-                        OrderMode::LessOrEqual => left <= right,
-                        OrderMode::GreaterThan => left > right,
-                        OrderMode::GreaterOrEqual => left >= right,
-                    }
-                    .into(),
-
-                    BinaryOp::LogicEqual(mode) => match mode {
-                        CompareMode::Equal => left == right,
-                        CompareMode::NotEqual => left != right,
-                    }
-                    .into(),
-
-                    BinaryOp::Bitwise(op) => match op {
-                        BinaryBitwiseOp::And => left & right,
-                        BinaryBitwiseOp::Or => left | right,
-                        BinaryBitwiseOp::Xor => left ^ right,
-                        BinaryBitwiseOp::Shift(BitwiseShiftDirection::Left) => left << right,
-                        BinaryBitwiseOp::Shift(BitwiseShiftDirection::Right) => left >> right,
-                    }
-                    .into(),
-
-                    BinaryOp::AndThen => (*right).into(),
-
-                    _ => Expr::BinaryOp(op, Box::new(lhs), Box::new(rhs)),
-                },
-
-                _ => Expr::BinaryOp(op, Box::new(lhs), Box::new(rhs)),
-            };
+            lhs = self
+                .program
+                .evaluate_binary_op(&op, &lhs, &rhs)
+                .map_err(|err| self.error(format!("{err:?}")))?
+                .unwrap_or_else(|| Expr::BinaryOp(op, Box::new(lhs), Box::new(rhs)));
         }
 
         Ok(lhs)
@@ -912,11 +880,11 @@ impl<'a> Parser<'a> {
     }
 
     /// create a generic (ie, lazy) parser error right here, right now
-    fn error<S: Into<String>, T>(&self, message: S) -> Result<T, ParseError> {
-        Err(ParseError {
+    fn error<S: Into<String>>(&self, message: S) -> ParseError {
+        ParseError {
             span: self.lexer.index.into(),
             kind: ParseErrorKind::Lazy(message.into()),
-        })
+        }
     }
 }
 

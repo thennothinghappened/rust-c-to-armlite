@@ -18,7 +18,9 @@ use crate::{
             CConcreteType, CEnum, CEnumId, CFunc, CFuncBody, CPrimitive, CSig, CSigId, CStruct,
             CStructId, CStructKind, CType, CTypeId, Member,
         },
-        expr::{BinaryOp, CompareMode, Expr, OrderMode, UnaryOp},
+        expr::{
+            BinaryBitwiseOp, BinaryOp, BitwiseShiftDirection, CompareMode, Expr, OrderMode, UnaryOp,
+        },
         source_writer::SourceWriter,
         statement::{Block, Statement, Variable},
         target_architecture::TargetArchitecture,
@@ -528,6 +530,52 @@ impl Program {
             | CPrimitive::UnsignedInt
             | CPrimitive::UnsignedLong
             | CPrimitive::UnsignedLongLong => false,
+        }
+    }
+
+    /// Evaluate the the given binary operation at compile-time, if indeed it is possible to do so.
+    pub(crate) fn evaluate_binary_op(
+        &self,
+        op: &BinaryOp,
+        left: &Expr,
+        right: &Expr,
+    ) -> anyhow::Result<Option<Expr>> {
+        match (left, right) {
+            (Expr::IntLiteral(left), Expr::IntLiteral(right)) => Ok(Some(match &op {
+                BinaryOp::Plus => (left + right).into(),
+                BinaryOp::Minus => (left - right).into(),
+                BinaryOp::LogicAnd => ((*left != 0) && (*right != 0)).into(),
+                BinaryOp::LogicOr => ((*left != 0) || (*right != 0)).into(),
+
+                BinaryOp::LogicOrdering(mode) => match mode {
+                    OrderMode::LessThan => left < right,
+                    OrderMode::LessOrEqual => left <= right,
+                    OrderMode::GreaterThan => left > right,
+                    OrderMode::GreaterOrEqual => left >= right,
+                }
+                .into(),
+
+                BinaryOp::LogicEqual(mode) => match mode {
+                    CompareMode::Equal => left == right,
+                    CompareMode::NotEqual => left != right,
+                }
+                .into(),
+
+                BinaryOp::Bitwise(op) => match op {
+                    BinaryBitwiseOp::And => left & right,
+                    BinaryBitwiseOp::Or => left | right,
+                    BinaryBitwiseOp::Xor => left ^ right,
+                    BinaryBitwiseOp::Shift(BitwiseShiftDirection::Left) => left << right,
+                    BinaryBitwiseOp::Shift(BitwiseShiftDirection::Right) => left >> right,
+                }
+                .into(),
+
+                BinaryOp::AndThen => (*right).into(),
+
+                _ => return Ok(None),
+            })),
+
+            _ => Ok(None),
         }
     }
 }
