@@ -653,10 +653,7 @@ impl<'a> Parser<'a> {
                 Ok(Expr::Reference(self.lexer.context.get_ident(id)))
             }
 
-            TokenKind::StringLiteral(id) => {
-                self.next();
-                Ok(Expr::StringLiteral(self.lexer.context.get_ident(id)))
-            }
+            TokenKind::StringLiteral(_) => self.consume_string().map(Expr::StringLiteral),
 
             TokenKind::IntLiteral(int) => {
                 self.next();

@@ -59,12 +59,20 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn accept_string(&mut self) -> Option<String> {
-        if let TokenKind::StringLiteral(id) = self.lexer.peek().kind {
+        let TokenKind::StringLiteral(id) = self.lexer.peek().kind else {
+            return None;
+        };
+
+        self.lexer.next();
+
+        let mut string = self.lexer.context.get_ident(id);
+
+        while let TokenKind::StringLiteral(id) = self.lexer.peek().kind {
             self.lexer.next();
-            return Some(self.lexer.context.get_ident(id));
+            string += &self.lexer.context.get_ident(id);
         }
 
-        None
+        Some(string)
     }
 
     pub(super) fn consume(&mut self) -> Result<Token, ParseError> {
