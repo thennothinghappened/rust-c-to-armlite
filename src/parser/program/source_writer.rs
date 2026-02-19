@@ -90,7 +90,9 @@ impl SourceWriter {
                 block = self.format_statement(program, block)
             ),
 
-            Statement::Return(expr) => {
+            Statement::Return(None) => "return;".to_owned(),
+
+            Statement::Return(Some(expr)) => {
                 format!("return {expr};", expr = self.format_expr(program, expr))
             }
 

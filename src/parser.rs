@@ -391,10 +391,16 @@ impl<'a> Parser<'a> {
             TokenKind::Return => {
                 self.next();
 
-                let value = self.parse_expr(0)?;
-                self.expect(TokenKind::Semicolon)?;
+                let value = if !self.accept(TokenKind::Semicolon) {
+                    let value = self.parse_expr(0)?;
+                    self.expect(TokenKind::Semicolon)?;
 
-                Ok(Statement::Return(Box::new(value)))
+                    Some(Box::new(value))
+                } else {
+                    None
+                };
+
+                Ok(Statement::Return(value))
             }
 
             TokenKind::Break => {

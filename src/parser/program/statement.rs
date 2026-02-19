@@ -19,7 +19,7 @@ pub enum Statement {
         block: Box<Statement>,
     },
 
-    Return(Box<Expr>),
+    Return(Option<Box<Expr>>),
     Break,
     Continue,
     Empty,

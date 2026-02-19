@@ -304,7 +304,30 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
 
             Statement::Expr(expr) => self.evaluate_expression(expr, NOWHERE)?,
 
-            Statement::Return(expr) => {
+            Statement::Return(None) => {
+                if !matches!(self.b.sig.returns, CType::AsIs(CConcreteType::Void)) {
+                    bail!(
+                        "Can't return no value, expecting a {}",
+                        self.format_ctype(self.b.sig.returns)
+                    );
+                }
+
+                self.b.header("<return>");
+
+                self.b.inline_comment("Perform the cleanup.");
+                self.b.b(self.done_label);
+
+                self.b.footer("</return>");
+            }
+
+            Statement::Return(Some(expr)) => {
+                if matches!(self.b.sig.returns, CType::AsIs(CConcreteType::Void)) {
+                    bail!(
+                        "Can't return `{expr}`, function returns void",
+                        expr = self.format_expr(expr)
+                    );
+                }
+
                 let temp_storage = self.allocate_anon(self.b.sig.returns);
 
                 self.b.header("<return>");
