@@ -390,6 +390,17 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 if_true,
                 if_false,
             } => {
+                match self.generator.program.evaluate_truthiness(condition)? {
+                    Some(true) => return self.generate_stmt(if_true),
+
+                    Some(false) => match if_false {
+                        Some(if_false) => return self.generate_stmt(if_false),
+                        None => return Ok(()),
+                    },
+
+                    None => (),
+                };
+
                 let if_false_label = self.b.create_label("If__else");
                 let done_label = self.b.create_label("If__done");
 
