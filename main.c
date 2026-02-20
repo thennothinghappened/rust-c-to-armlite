@@ -5,11 +5,7 @@
 #include <armlite/display.h>
 #include <string.h>
 
-#ifdef __armlite__
-#define GRAPHICS_SUPPORTED true
-#endif
-
-#ifdef GRAPHICS_SUPPORTED
+#ifdef ARMLITE_GRAPHICS
 
 bool g_graphicsReady;
 
@@ -125,13 +121,13 @@ void Calculator() {
 int main() {
 	char userInput[128];
 
-#ifdef GRAPHICS_SUPPORTED
+#ifdef ARMLITE_GRAPHICS
 	g_graphicsReady = false;
 #endif
 
 	while (true) {
 		WriteString("Pick an option!\n"
-#ifdef GRAPHICS_SUPPORTED
+#ifdef ARMLITE_GRAPHICS
 			"- GraphicsTest\n"
 #endif
 			"- Calculator\n"
@@ -140,7 +136,7 @@ int main() {
 
 		ReadString(userInput);
 
-#ifdef GRAPHICS_SUPPORTED
+#ifdef ARMLITE_GRAPHICS
 		if (strcmp(userInput, "GraphicsTest") == 0) {
 			GraphicsTest();
 			continue;

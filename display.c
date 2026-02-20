@@ -3,7 +3,6 @@
 #include <armlite/display.h>
 
 void DisplayInit() {
-#ifdef __armlitec__
 	// this is here purely because clangd breaks syntax highlighting after a `#` in __asm__ lol.
 	Colour *displayGrid;
 
@@ -11,7 +10,4 @@ void DisplayInit() {
 	__asm__("STR R0, [R11-#4]");
 
 	g_displayGrid = displayGrid;
-#else
-	Panic("No display supported on this platform");
-#endif
 }

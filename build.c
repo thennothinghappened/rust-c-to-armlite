@@ -8,7 +8,11 @@
 #include "stdlib/src/stdlib.c"
 #endif
 
+#include "main.c"
+
 #include "armlite.c"
 #include "armlite-io.c"
+
+#ifdef ARMLITE_GRAPHICS
 #include "display.c"
-#include "main.c"
+#endif
