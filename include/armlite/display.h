@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __armlite__
@@ -15,7 +16,7 @@ typedef uint32_t Colour;
 #define DISPLAY_GRID_ROWS 24
 #define DISPLAY_GRID_COLUMNS 32
 
-Colour *g_displayGrid;
+Colour *g_displayGrid = NULL;
 
 /// Initialise the ARMLite display. Must be called before writing to `g_displayGrid`.
 void DisplayInit();

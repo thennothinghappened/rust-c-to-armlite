@@ -7,13 +7,8 @@
 
 #ifdef ARMLITE_GRAPHICS
 
-bool g_graphicsReady;
-
 void GraphicsTest() {
-	if (!g_graphicsReady) {
-		DisplayInit();
-		g_graphicsReady = true;
-	}
+	DisplayInit();
 	
 	for (size_t iterations = 0; iterations < 50; iterations ++) {
 		for (size_t y = 0; y < DISPLAY_GRID_ROWS; y ++) {
@@ -120,10 +115,6 @@ void Calculator() {
 
 int main() {
 	char userInput[128];
-
-#ifdef ARMLITE_GRAPHICS
-	g_graphicsReady = false;
-#endif
 
 	while (true) {
 		WriteString("Pick an option!\n"

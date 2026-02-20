@@ -18,15 +18,16 @@ void abort() {
 /// 
 /// FIXME: This is not a good heap implementation!!
 struct {
-	bool initialised;
 	size_t nextOffset;
 	char heap[__ARMLITE_HEAP_BYTES];
 } __g_heap;
 
+bool __g_heapInitialised = false;
+
 void *malloc(size_t size) {
-	if (!__g_heap.initialised) {
+	if (!__g_heapInitialised) {
 		__g_heap.nextOffset = 0;
-		__g_heap.initialised = true;
+		__g_heapInitialised = true;
 	}
 
 	size_t remainingSpace = (__ARMLITE_HEAP_BYTES - __g_heap.nextOffset);

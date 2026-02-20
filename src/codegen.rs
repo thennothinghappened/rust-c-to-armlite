@@ -48,6 +48,48 @@ impl Generator {
     }
 
     pub fn generate(self) -> String {
+        // FIXME FIXME FIXME: This is a disgusting workaround to get globals initialised and could
+        // technically cause naming clashes, plus is just a waste of instructions during startup.
+        //
+        // This is caused by C runtime initialisation being handled *above* the level of
+        // FuncGenerator, thus if we want to do any C evaluation, we need to invoke a FuncGenerator,
+        // which in turn, because there's no inline support, means we have to create a whole new
+        // named function in the output just to run `<global> = <expr>;`.
+        //
+        // All of that points to the fact that the weird distinction between Generator,
+        // FuncGenerator, FuncBuilder, and FileBuilder needs to be refactored desperately. The
+        // relationship between all of these structs is really weird and interdependent.
+        let global_init_functions: Vec<(String, CFunc)> = self
+            .program
+            .get_global_variables()
+            .filter_map(|(name, (ctype, value))| {
+                self.file_builder
+                    .create_global(name, self.sizeof_ctype(*ctype));
+
+                let value = value.as_ref()?;
+                let init_func_name = format!("__{name}__init__");
+                Some((
+                    init_func_name,
+                    CFunc {
+                        sig_id: self.program.get_signature_id(CSig {
+                            args: vec![],
+                            returns: CConcreteType::Void.into(),
+                            is_noreturn: false,
+                        }),
+                        body: CFuncBody::Defined(Block {
+                            statements: vec![Statement::Expr(Expr::BinaryOp(
+                                BinaryOp::Assign,
+                                Box::new(Expr::Reference(name.to_string())),
+                                Box::new(value.clone()),
+                            ))],
+                            vars: HashMap::default(),
+                        }),
+                        is_raw_assembly: false,
+                    },
+                ))
+            })
+            .collect_vec();
+
         self.file_builder.create_function(
             "start",
             &CSig {
@@ -59,6 +101,13 @@ impl Generator {
                 b.append_doc_line("C Runtime Entry Point");
                 b.append_doc_line("Initialises the C environment and calls main().");
 
+                b.header("Initialise global variables.");
+
+                for (init_func_name, _) in &global_init_functions {
+                    b.call(init_func_name.clone());
+                }
+
+                b.header("Jump to user code.");
                 b.call("main");
 
                 b.asm("c_entry_post_run:");
@@ -86,25 +135,21 @@ impl Generator {
             },
         );
 
-        for (name, (ctype, value)) in self.program.get_global_variables() {
-            self.file_builder
-                .create_global(name, self.sizeof_ctype(*ctype));
-
-            if let Some(value) = value {
-                todo!("Global variable initialization")
-            }
-        }
-
         let mut failures = Vec::<(&str, anyhow::Error)>::new();
 
         for (name, cfunc) in self
             .program
             .get_functions()
             .filter(|(_, cfunc)| !matches!(cfunc.body, CFuncBody::Extern))
+            .chain(
+                global_init_functions
+                    .iter()
+                    .map(|entry| (entry.0.as_str(), &entry.1)),
+            )
         {
             let sig = self.program.get_signature(cfunc.sig_id);
 
-            self.file_builder.create_function(name, sig, |b| {
+            self.file_builder.create_function(name, &sig, |b| {
                 if !b.sig.args.is_empty() {
                     b.append_doc_line("# Arguments");
 

@@ -3,6 +3,10 @@
 #include <armlite/display.h>
 
 void DisplayInit() {
+	if (g_displayGrid != NULL) {
+		return;
+	}
+
 	// this is here purely because clangd breaks syntax highlighting after a `#` in __asm__ lol.
 	Colour *displayGrid;
 

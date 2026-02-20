@@ -51,8 +51,8 @@ pub struct Program {
     enums: HashMap<CEnumId, CEnum>,
     next_enum_id: CEnumId,
 
-    func_types: HashMap<CSigId, CSig>,
-    next_func_type_id: CSigId,
+    func_types: RefCell<HashMap<CSigId, CSig>>,
+    next_func_type_id: Cell<CSigId>,
 
     type_aliases: HashMap<String, CTypeId>,
     ctypes: RefCell<IndexMap<CTypeId, CType>>,
@@ -220,22 +220,24 @@ impl Program {
             .expect("Getting a CStruct by its ID should NEVER fail or we're out of sync")
     }
 
-    pub fn get_signature(&self, id: CSigId) -> &CSig {
+    pub fn get_signature(&self, id: CSigId) -> CSig {
         self.func_types
+            .borrow()
             .get(&id)
             .expect("Getting a CFuncSig by its ID should NEVER fail or we're out of sync")
+            .clone()
     }
 
     /// Define a new function type, or return the existing ID if it isn't unique.
-    pub fn get_signature_id(&mut self, cfunc_type: CSig) -> CSigId {
-        for (id, sig) in &self.func_types {
+    pub fn get_signature_id(&self, cfunc_type: CSig) -> CSigId {
+        for (id, sig) in self.func_types.borrow().iter() {
             if cfunc_type == *sig {
                 return *id;
             }
         }
 
         let id = self.next_func_type_id.get_and_increment();
-        self.func_types.insert(id, cfunc_type);
+        self.func_types.borrow_mut().insert(id, cfunc_type);
 
         id
     }
