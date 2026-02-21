@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt::Display,
+    ops::{Shl, Shr},
 };
 
 use anyhow::{anyhow, bail, Context};
@@ -57,6 +58,8 @@ pub struct Program {
     type_aliases: HashMap<String, CTypeId>,
     ctypes: RefCell<IndexMap<CTypeId, CType>>,
     next_ctype_id: Cell<CTypeId>,
+
+    ctype_size_cache: RefCell<HashMap<CType, u32>>,
 
     pub source_writer: SourceWriter,
     pub arch: TargetArchitecture,
@@ -533,6 +536,73 @@ impl Program {
             | CPrimitive::UnsignedLong
             | CPrimitive::UnsignedLongLong => false,
         }
+    }
+
+    /// Get the size, in bytes, of the given C type. The returned size is *not* aligned to the
+    /// architecture's byte size.
+    pub fn sizeof_ctype(&self, ctype: CType) -> u32 {
+        if let Some(size) = self.ctype_size_cache.borrow().get(&ctype) {
+            return *size;
+        }
+
+        let size = match ctype {
+            CType::PointerTo(_, None) => self.arch.word_size(),
+
+            CType::PointerTo(inner_id, Some(element_count)) => {
+                self.sizeof_ctype(self.get_ctype(inner_id)) * element_count
+            }
+
+            CType::AsIs(concrete) => match concrete {
+                CConcreteType::Struct(cstruct_id) => {
+                    let cstruct = self.get_struct(cstruct_id);
+
+                    cstruct
+                        .members
+                        .as_ref()
+                        .map(|members| {
+                            let member_sizes = members
+                                .iter()
+                                .map(|member| self.align(self.sizeof_ctype(member.ctype)));
+
+                            match cstruct.kind {
+                                CStructKind::Struct => member_sizes.sum(),
+                                CStructKind::Union => member_sizes.max().unwrap_or(0),
+                            }
+                        })
+                        .unwrap_or(0)
+                }
+
+                CConcreteType::Enum(cenum_id) => self.arch.word_size(),
+                CConcreteType::Func(_) => self.arch.word_size(),
+                CConcreteType::Primitive(primitive) => self.sizeof_primitive(primitive),
+                CConcreteType::Void => 0,
+            },
+        };
+
+        self.ctype_size_cache.borrow_mut().insert(ctype, size);
+        size
+    }
+
+    pub fn sizeof_primitive(&self, primitive: CPrimitive) -> u32 {
+        self.arch.primitive_byte_size(primitive)
+    }
+
+    pub fn align<Scalar>(&self, offset: Scalar) -> Scalar
+    where
+        Scalar: Shl<Output = Scalar>,
+        Scalar: Shr<Output = Scalar>,
+        Scalar: Ord,
+        Scalar: From<u8>,
+        Scalar: Copy,
+    {
+        let shift_bits = (self.arch.word_size().ilog2() as u8).into();
+        let mut actual_offset: Scalar = (offset >> shift_bits) << shift_bits;
+
+        if actual_offset < 4.into() {
+            actual_offset = (self.arch.word_size() as u8).into();
+        }
+
+        actual_offset
     }
 
     /// Evaluate the given expression at compile-time, if indeed it is possible to do so.

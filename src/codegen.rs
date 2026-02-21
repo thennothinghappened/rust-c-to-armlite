@@ -35,7 +35,6 @@ const WORD_SIZE: u32 = 4;
 pub struct Generator {
     program: Program,
     file_builder: FileBuilder,
-    ctype_size_cache: RefCell<HashMap<CType, u32>>,
 }
 
 impl Generator {
@@ -43,7 +42,6 @@ impl Generator {
         Self {
             program,
             file_builder: FileBuilder::new(asm_mode),
-            ctype_size_cache: HashMap::default().into(),
         }
     }
 
@@ -62,9 +60,9 @@ impl Generator {
         let global_init_functions: Vec<(String, CFunc)> = self
             .program
             .get_global_variables()
-            .filter_map(|(name, (ctype, value))| {
+            .filter_map(|(name, (&ctype, value))| {
                 self.file_builder
-                    .create_global(name, self.sizeof_ctype(*ctype));
+                    .create_global(name, self.sizeof_ctype(ctype));
 
                 let value = value.as_ref()?;
                 let init_func_name = format!("__{name}__init__");
@@ -203,56 +201,14 @@ impl Generator {
         output
     }
 
-    fn sizeof_ctype(&self, ctype: impl Into<CTypeOrId>) -> u32 {
-        let ctype = match ctype.into() {
-            CTypeOrId::CType(ctype) => ctype,
-            CTypeOrId::Id(ctype_id) => self.program.get_ctype(ctype_id),
-        };
-
-        if let Some(size) = self.ctype_size_cache.borrow().get(&ctype) {
-            return *size;
-        }
-
-        let size = match ctype {
-            CType::PointerTo(_, None) => WORD_SIZE,
-
-            CType::PointerTo(inner_id, Some(element_count)) => {
-                self.sizeof_ctype(self.program.get_ctype(inner_id)) * element_count
-            }
-
-            CType::AsIs(concrete) => match concrete {
-                CConcreteType::Struct(cstruct_id) => {
-                    let cstruct = self.program.get_struct(cstruct_id);
-
-                    cstruct
-                        .members
-                        .as_ref()
-                        .map(|members| {
-                            let member_sizes = members
-                                .iter()
-                                .map(|member| self.align(self.sizeof_ctype(member.ctype)));
-
-                            match cstruct.kind {
-                                CStructKind::Struct => member_sizes.sum(),
-                                CStructKind::Union => member_sizes.max().unwrap_or(0),
-                            }
-                        })
-                        .unwrap_or(0)
-                }
-
-                CConcreteType::Enum(cenum_id) => WORD_SIZE,
-                CConcreteType::Func(_) => WORD_SIZE,
-                CConcreteType::Primitive(primitive) => self.sizeof_primitive(primitive),
-                CConcreteType::Void => 0,
-            },
-        };
-
-        self.ctype_size_cache.borrow_mut().insert(ctype, size);
-        size
+    /// Get the size, in bytes, of the given C type. The returned size is *not* aligned to the
+    /// architecture's byte size.
+    pub fn sizeof_ctype(&self, ctype: CType) -> u32 {
+        self.program.sizeof_ctype(ctype)
     }
 
-    fn sizeof_primitive(&self, primitive: CPrimitive) -> u32 {
-        self.program.arch.primitive_byte_size(primitive)
+    pub fn sizeof_primitive(&self, primitive: CPrimitive) -> u32 {
+        self.program.sizeof_primitive(primitive)
     }
 
     pub fn align<Scalar>(&self, offset: Scalar) -> Scalar
@@ -261,14 +217,9 @@ impl Generator {
         Scalar: Shr<Output = Scalar>,
         Scalar: Ord,
         Scalar: From<u8>,
+        Scalar: Copy,
     {
-        let mut actual_offset: Scalar = (offset >> 2.into()) << 2.into();
-
-        if actual_offset < 4.into() {
-            actual_offset = 4.into();
-        }
-
-        actual_offset
+        self.program.align(offset)
     }
 }
 

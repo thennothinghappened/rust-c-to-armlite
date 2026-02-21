@@ -85,8 +85,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
     fn allocate_anon(&mut self, ctype: impl Into<CType>) -> StackLocal {
         let ctype = ctype.into();
 
-        let size = self.generator.sizeof_ctype(ctype);
-        let actual_size = self.generator.align(size);
+        let size = self.generator.program.sizeof_ctype(ctype);
+        let actual_size = self.generator.program.align(size);
 
         // look for a free spot first before allocing.
         let mut offset = 0;
@@ -735,8 +735,8 @@ impl<'a, 'b> FuncGenerator<'a, 'b> {
                 destination_primitive.is_integer_type(),
             ) {
                 (true, true) => {
-                    let source_size = self.generator.sizeof_ctype(source_primitive);
-                    let destination_size = self.generator.sizeof_ctype(destination_primitive);
+                    let source_size = self.generator.sizeof_primitive(source_primitive);
+                    let destination_size = self.generator.sizeof_primitive(destination_primitive);
 
                     self.b.header(format!(
                         "Casting value with size {source_size} to {destination_size}"
